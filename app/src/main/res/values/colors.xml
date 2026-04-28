@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="app_bg_start">#F6FAFC</color>
+    <color name="app_bg_end">#EAF3F8</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_soft">#F3F8FB</color>
+    <color name="surface_tint">#EAF6FC</color>
+    <color name="surface_success">#E8F7EE</color>
+    <color name="surface_warning">#FFF5DF</color>
+    <color name="text_primary">#10212B</color>
+    <color name="text_secondary">#5D6B75</color>
+    <color name="text_muted">#7D8B94</color>
+    <color name="brand">#1187C9</color>
+    <color name="brand_dark">#0A5F8F</color>
+    <color name="brand_soft">#DDF1FA</color>
+    <color name="accent">#16A36B</color>
+    <color name="accent_dark">#0B7A50</color>
+    <color name="warning">#C97A14</color>
+    <color name="stroke">#DCE8EF</color>
+    <color name="stroke_strong">#BFD5E0</color>
+    <color name="white">#FFFFFF</color>
+</resources>

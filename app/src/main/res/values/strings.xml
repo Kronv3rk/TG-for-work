@@ -1,4 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">TG for Work</string>
+    <string name="content_app_mark">Логотип TG for Work</string>
+    <string name="content_security_illustration">Иллюстрация защищённого рабочего подключения</string>
+    <string name="content_status_icon">Статус подключения</string>
+    <string name="content_proxy_icon">Иконка прокси</string>
+    <string name="content_lock_icon">Иконка защиты</string>
+    <string name="content_route_icon">Иконка маршрута</string>
+    <string name="content_work_icon">Иконка рабочего профиля</string>
+    <string name="home_status_online">Готово к работе</string>
+    <string name="home_status_short">Готово</string>
+    <string name="home_title">TG for Work</string>
+    <string name="home_subtitle">Быстрый и аккуратный доступ к рабочим чатам через защищённый профиль.</string>
+    <string name="hero_label">Рабочее пространство</string>
+    <string name="hero_title">Подключение под контролем</string>
+    <string name="hero_body">Проверяйте маршрут, статус защиты и профиль запуска с одного экрана без лишних переходов.</string>
+    <string name="primary_action">Подключить рабочий профиль</string>
+    <string name="secondary_action">Проверить связь</string>
+    <string name="metrics_title">Состояние сейчас</string>
+    <string name="metric_latency_label">Задержка</string>
+    <string name="metric_latency_value">42 мс</string>
+    <string name="metric_sessions_label">Сессии</string>
+    <string name="metric_sessions_value">3</string>
+    <string name="metric_protection_label">Защита</string>
+    <string name="metric_protection_value">Вкл.</string>
+    <string name="quick_title">Быстрые параметры</string>
+    <string name="proxy_title">Прокси</string>
+    <string name="proxy_body">Автоматический выбор стабильного узла.</string>
+    <string name="security_title">Шифрование</string>
+    <string name="security_body">Проверка защищённого канала перед запуском.</string>
+    <string name="route_title">Маршрут</string>
+    <string name="route_body">Приоритет рабочих сервисов и уведомлений.</string>
+    <string name="profile_title">Профиль</string>
+    <string name="profile_body">Отдельные настройки для рабочих чатов.</string>
+    <string name="footer_title">Готово к выпуску</string>
+    <string name="footer_body">Интерфейс собран из локальных Android-ресурсов и подходит для CI-сборки APK.</string>
+    <string name="settings_action">Настройки</string>
+    <string name="logs_action">Журнал</string>
 </resources>
