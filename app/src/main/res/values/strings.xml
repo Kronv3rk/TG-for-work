@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TG WS Proxy</string>
+    <string name="proxy_running">Прокси запущен</string>
+    <string name="proxy_stopped">Прокси остановлен</string>
+    <string name="notif_channel_name">TG WS Proxy</string>
+    <string name="notif_channel_desc">Уведомление о работе MTProto-прокси</string>
+</resources>
