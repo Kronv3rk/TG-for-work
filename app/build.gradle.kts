@@ -1,5 +1,7 @@
-apply(plugin = "com.android.application")
-apply(plugin = "org.jetbrains.kotlin.android")
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
 
 val releaseKeystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
 val releaseKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
