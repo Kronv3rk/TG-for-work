@@ -1,14 +1,25 @@
 package com.flowseal.tgwsproxy.proxy
 
-/**
- * Coroutine-agnostic bridge loop helper.
- *
- * Keeps looping while [isActive] returns true and invokes [block] on each iteration.
- * This file intentionally avoids external coroutine library imports so it can compile
- * in minimal environments.
- */
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlin.coroutines.coroutineContext
+
 object Bridge {
-    suspend fun run(isActive: () -> Boolean, block: suspend () -> Unit) {
+    suspend inline fun runWhileActive(crossinline block: suspend () -> Unit) {
+        while (true) {
+            coroutineContext.ensureActive()
+            block()
+        }
+    }
+
+    suspend inline fun run(scope: CoroutineScope, crossinline block: suspend () -> Unit) {
+        while (scope.isActive) {
+            block()
+        }
+    }
+
+    suspend inline fun run(isActive: () -> Boolean, crossinline block: suspend () -> Unit) {
         while (isActive()) {
             block()
         }
