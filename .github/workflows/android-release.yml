@@ -1,0 +1,168 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    name: Build APK and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$TAG" =~ ^v[0-9]+(\.[0-9]+)*([-+][A-Za-z0-9._-]+)?$ ]]; then
+            echo "Release tag must look like v1.0.0, got: $TAG" >&2
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(command -v sdkmanager || true)"
+          fi
+          if [[ -z "$SDKMANAGER" ]]; then
+            echo "sdkmanager was not found" >&2
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Configure release signing
+        id: signing
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" \
+            && -n "$ANDROID_KEYSTORE_PASSWORD" \
+            && -n "$ANDROID_KEY_ALIAS" \
+            && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            mkdir -p "$RUNNER_TEMP/signing"
+            KEYSTORE_FILE="$RUNNER_TEMP/signing/release.jks"
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
+
+            {
+              echo "ANDROID_KEYSTORE_FILE=$KEYSTORE_FILE"
+              echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD"
+              echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS"
+              echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build APK
+        id: build
+        shell: bash
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+
+          if [[ "${{ steps.signing.outputs.enabled }}" == "true" ]]; then
+            gradle :app:assembleRelease --no-daemon
+            APK_PATH="$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)"
+            APK_KIND="release-signed"
+          else
+            gradle :app:assembleDebug --no-daemon
+            APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)"
+            APK_KIND="debug"
+          fi
+
+          if [[ -z "$APK_PATH" || ! -f "$APK_PATH" ]]; then
+            echo "APK was not produced" >&2
+            exit 1
+          fi
+
+          ASSET_NAME="TG-for-work-${TAG}-${APK_KIND}.apk"
+          ASSET_PATH="$RUNNER_TEMP/$ASSET_NAME"
+          cp "$APK_PATH" "$ASSET_PATH"
+
+          echo "asset_name=$ASSET_NAME" >> "$GITHUB_OUTPUT"
+          echo "asset_path=$ASSET_PATH" >> "$GITHUB_OUTPUT"
+          echo "apk_kind=$APK_KIND" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.asset_name }}
+          path: ${{ steps.build.outputs.asset_path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          APK="${{ steps.build.outputs.asset_path }}"
+          APK_KIND="${{ steps.build.outputs.apk_kind }}"
+          NOTES="$RUNNER_TEMP/release-notes.md"
+
+          if [[ "$APK_KIND" == "release-signed" ]]; then
+            echo "Signed Android release APK built by GitHub Actions." > "$NOTES"
+          else
+            {
+              echo "Debug-signed Android APK built by GitHub Actions."
+              echo
+              echo "Configure Android signing secrets to publish signed release APKs."
+            } > "$NOTES"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+          else
+            gh release create "$TAG" "$APK" \
+              --title "$TAG" \
+              --notes-file "$NOTES" \
+              --target "$GITHUB_SHA"
+          fi
