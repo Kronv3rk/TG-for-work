@@ -117,7 +117,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         stopButton.setOnClickListener {
-            stopProxy()
+            if (ProxyRuntime.isRunning()) {
+                stopProxy()
+            } else {
+                startProxy(openTelegram = false)
+            }
         }
 
         copyButton.setOnClickListener {
@@ -131,7 +135,9 @@ class MainActivity : AppCompatActivity() {
         proxyRow.setOnClickListener { copyProxyLink() }
         securityRow.setOnClickListener { fakeTlsSwitch.isChecked = !fakeTlsSwitch.isChecked }
         routeRow.setOnClickListener { cfProxySwitch.isChecked = !cfProxySwitch.isChecked }
-        profileRow.setOnClickListener { restartProxy() }
+        profileRow.setOnClickListener {
+            Toast.makeText(this, ProxyRuntime.snapshot(this).lastMessage, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun startProxy(openTelegram: Boolean) {
@@ -154,8 +160,13 @@ class MainActivity : AppCompatActivity() {
         routeValue.text = routeLabel(stats)
         sessionsValue.text = "${stats.activeConnections}/${stats.totalConnections}"
         trafficValue.text = stats.transferred
-        stopButton.isEnabled = stats.running
-        stopButton.alpha = if (stats.running) 1.0f else 0.55f
+        stopButton.text = getString(if (stats.running) R.string.primary_action_stop else R.string.primary_action_start)
+        stopButton.setBackgroundResource(if (stats.running) R.drawable.bg_danger_button else R.drawable.bg_primary_button)
+        stopButton.setTextColor(colorCompat(if (stats.running) R.color.danger else R.color.white))
+        stopButton.compoundDrawables.forEach { drawable ->
+            drawable?.setTint(colorCompat(if (stats.running) R.color.danger else R.color.white))
+        }
+        stopButton.alpha = 1.0f
         footerBody.text = buildString {
             append(stats.lastMessage)
             if (stats.proxyLink.isNotBlank()) {

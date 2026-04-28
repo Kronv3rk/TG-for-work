@@ -59,6 +59,8 @@ class TelegramProxy(
     val isRunning: Boolean
         get() = serverSocket?.isClosed == false
 
+    fun hasOptions(newOptions: ProxyOptions): Boolean = options == newOptions
+
     fun start() {
         if (isRunning) return
         if (options.cfProxyEnabled) {
@@ -171,6 +173,10 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ): Boolean {
+        if (options.cellularNetwork && options.cfProxyEnabled) {
+            lastMessage = "Мобильная сеть: прямой WebSocket пропущен, пробуем Cloudflare"
+            return false
+        }
         val targetIp = dcRedirects[dcId] ?: return false
         for (domain in wsDomains(dcId, isMedia)) {
             val ws = try {

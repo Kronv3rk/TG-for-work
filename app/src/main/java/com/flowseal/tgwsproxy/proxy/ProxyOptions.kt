@@ -7,7 +7,8 @@ data class ProxyOptions(
     val cfProxyEnabled: Boolean = true,
     val cfProxyPriority: Boolean = true,
     val cfProxyUserDomain: String = "",
-    val fakeTlsDomain: String = DEFAULT_FAKE_TLS_DOMAIN
+    val fakeTlsDomain: String = DEFAULT_FAKE_TLS_DOMAIN,
+    val cellularNetwork: Boolean = false
 ) {
     val fakeTlsEnabled: Boolean
         get() = fakeTlsDomain.isNotBlank()

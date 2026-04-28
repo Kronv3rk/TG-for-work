@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.widget.Toast
 import com.flowseal.tgwsproxy.R
@@ -21,15 +23,31 @@ object ProxyRuntime {
 
     @Synchronized
     fun start(context: Context): TelegramProxy {
+        val options = loadOptions(context.applicationContext)
+        val existing = proxy
+        if (existing != null) {
+            if (!existing.hasOptions(options)) {
+                existing.close()
+                proxy = null
+            } else {
+                existing.start()
+                return existing
+            }
+        }
+        val created = TelegramProxy(options)
+        proxy = created
+        created.start()
+        return created
+    }
+
+    @Synchronized
+    fun ensureStarted(context: Context): TelegramProxy {
         val existing = proxy
         if (existing != null) {
             existing.start()
             return existing
         }
-        val created = TelegramProxy(loadOptions(context.applicationContext))
-        proxy = created
-        created.start()
-        return created
+        return start(context)
     }
 
     @Synchronized
@@ -101,7 +119,17 @@ object ProxyRuntime {
             cfProxyPriority = prefs.getBoolean(KEY_CF_PRIORITY, true),
             cfProxyUserDomain = prefs.getString(KEY_CF_USER_DOMAIN, "").orEmpty(),
             fakeTlsDomain = prefs.getString(KEY_FAKE_TLS_DOMAIN, ProxyOptions.DEFAULT_FAKE_TLS_DOMAIN)
-                .orEmpty()
+                .orEmpty(),
+            cellularNetwork = isCellularNetwork(context)
         )
+    }
+
+    private fun isCellularNetwork(context: Context): Boolean {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) &&
+            !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 }

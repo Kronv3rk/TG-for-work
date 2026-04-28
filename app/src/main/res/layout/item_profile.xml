@@ -18,7 +18,7 @@
         android:background="@drawable/bg_icon_brand"
         android:contentDescription="@string/content_work_icon"
         android:padding="9dp"
-        android:src="@drawable/ic_briefcase" />
+        android:src="@drawable/ic_speed" />
 
     <LinearLayout
         android:layout_width="0dp"
