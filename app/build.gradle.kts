@@ -22,8 +22,8 @@ android {
         applicationId = "com.flowseal.tgwsproxy"
         minSdk = 24
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.3.1"
+        versionCode = 6
+        versionName = "1.4.0"
     }
 
     signingConfigs {
@@ -61,5 +61,6 @@ android {
 }
 
 dependencies {
+    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

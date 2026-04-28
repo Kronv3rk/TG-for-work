@@ -16,6 +16,8 @@
     <color name="accent">#16A36B</color>
     <color name="accent_dark">#0B7A50</color>
     <color name="warning">#C97A14</color>
+    <color name="danger">#C43B4B</color>
+    <color name="danger_soft">#FCE9EC</color>
     <color name="stroke">#DCE8EF</color>
     <color name="stroke_strong">#BFD5E0</color>
     <color name="white">#FFFFFF</color>

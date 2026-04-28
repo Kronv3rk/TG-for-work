@@ -122,11 +122,15 @@ class RawWebSocket private constructor(
         private const val OP_CLOSE = 0x8
         private const val OP_PING = 0x9
         private const val OP_PONG = 0xA
+        private const val BUFFER_SIZE = 256 * 1024
         private val random = SecureRandom()
 
         fun connect(targetIp: String, domain: String, timeoutMs: Int = 10_000): RawWebSocket {
             val plain = Socket()
             plain.tcpNoDelay = true
+            plain.keepAlive = true
+            plain.receiveBufferSize = BUFFER_SIZE
+            plain.sendBufferSize = BUFFER_SIZE
             plain.connect(InetSocketAddress(targetIp, 443), timeoutMs)
             plain.soTimeout = timeoutMs
 

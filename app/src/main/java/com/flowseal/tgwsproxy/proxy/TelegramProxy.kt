@@ -78,6 +78,9 @@ class TelegramProxy(
                 try {
                     val socket = server.accept()
                     socket.tcpNoDelay = true
+                    socket.keepAlive = true
+                    socket.receiveBufferSize = BUFFER_SIZE
+                    socket.sendBufferSize = BUFFER_SIZE
                     clients += socket
                     totalConnections.incrementAndGet()
                     activeConnections.incrementAndGet()
@@ -229,7 +232,7 @@ class TelegramProxy(
         splitter: MtprotoPacketSplitter?
     ): Boolean {
         for (baseDomain in cfBalancer.getDomainsForDc(dcId)) {
-            val domain = "kws${if (dcId == 203) 2 else dcId}.$baseDomain"
+            val domain = "kws$dcId.$baseDomain"
             val ws = try {
                 RawWebSocket.connect(domain, domain)
             } catch (ignored: Exception) {
@@ -260,6 +263,9 @@ class TelegramProxy(
         }
         Socket().use { remote ->
             remote.tcpNoDelay = true
+            remote.keepAlive = true
+            remote.receiveBufferSize = BUFFER_SIZE
+            remote.sendBufferSize = BUFFER_SIZE
             remote.connect(java.net.InetSocketAddress(targetIp, 443), 10_000)
             val remoteIn = BufferedInputStream(remote.getInputStream())
             val remoteOut = BufferedOutputStream(remote.getOutputStream())
@@ -563,7 +569,7 @@ class TelegramProxy(
     companion object {
         const val DEFAULT_HOST = "127.0.0.1"
         const val DEFAULT_PORT = 1443
-        private const val BUFFER_SIZE = 64 * 1024
+        private const val BUFFER_SIZE = 256 * 1024
         private const val HANDSHAKE_LEN = 64
         private const val SKIP_LEN = 8
         private const val PREKEY_LEN = 32

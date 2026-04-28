@@ -157,6 +157,23 @@
                 android:textAllCaps="false"
                 android:textColor="@color/brand_dark"
                 android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/stopButton"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_danger_button"
+                android:drawableStart="@drawable/ic_power"
+                android:drawablePadding="8dp"
+                android:drawableTint="@color/danger"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:minHeight="50dp"
+                android:text="@string/primary_action_stop"
+                android:textAllCaps="false"
+                android:textColor="@color/danger"
+                android:textSize="15sp" />
         </LinearLayout>
 
         <TextView
@@ -194,7 +211,7 @@
                     android:textSize="12sp" />
 
                 <TextView
-                    android:id="@+id/sessionsValue"
+                    android:id="@+id/routeValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
@@ -225,7 +242,7 @@
                     android:textSize="12sp" />
 
                 <TextView
-                    android:id="@+id/protectionValue"
+                    android:id="@+id/sessionsValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
@@ -247,6 +264,7 @@
                 android:padding="10dp">
 
                 <TextView
+                    android:id="@+id/trafficValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center"
@@ -281,13 +299,21 @@
             android:layout_marginTop="12dp"
             android:orientation="vertical">
 
-            <include layout="@layout/item_proxy" />
+            <include
+                android:id="@+id/proxyRow"
+                layout="@layout/item_proxy" />
 
-            <include layout="@layout/item_security" />
+            <include
+                android:id="@+id/securityRow"
+                layout="@layout/item_security" />
 
-            <include layout="@layout/item_route" />
+            <include
+                android:id="@+id/routeRow"
+                layout="@layout/item_route" />
 
-            <include layout="@layout/item_profile" />
+            <include
+                android:id="@+id/profileRow"
+                layout="@layout/item_profile" />
         </LinearLayout>
 
         <LinearLayout
