@@ -3,6 +3,8 @@ package com.flowseal.tgwsproxy.proxy
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.Closeable
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -19,18 +21,19 @@ import kotlin.experimental.xor
 import kotlin.math.abs
 
 class TelegramProxy(
-    private val host: String = "127.0.0.1",
-    private val port: Int = 1443,
-    private val secretHex: String
+    private val options: ProxyOptions
 ) : Closeable {
     private val random = SecureRandom()
     private val executor = Executors.newCachedThreadPool()
+    private val cfBalancer = CfProxyBalancer()
     private val clients = CopyOnWriteArraySet<Socket>()
     private val activeConnections = AtomicInteger(0)
     private val totalConnections = AtomicInteger(0)
     private val wsConnections = AtomicInteger(0)
     private val tcpFallbackConnections = AtomicInteger(0)
+    private val cfProxyConnections = AtomicInteger(0)
     private val badConnections = AtomicInteger(0)
+    private val maskedConnections = AtomicInteger(0)
     private val bytesUp = AtomicLong(0)
     private val bytesDown = AtomicLong(0)
 
@@ -41,18 +44,35 @@ class TelegramProxy(
     private var lastMessage: String = "Прокси остановлен"
 
     val proxyLink: String
-        get() = "tg://proxy?server=$host&port=$port&secret=dd$secretHex"
+        get() = if (options.fakeTlsEnabled) fakeTlsProxyLink else plainProxyLink
+
+    val plainProxyLink: String
+        get() = "tg://proxy?server=${options.host}&port=${options.port}&secret=dd${options.secretHex}"
+
+    private val fakeTlsProxyLink: String
+        get() {
+            val domainHex = options.fakeTlsDomain.toByteArray(Charsets.US_ASCII)
+                .joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+            return "tg://proxy?server=${options.host}&port=${options.port}&secret=ee${options.secretHex}$domainHex"
+        }
 
     val isRunning: Boolean
         get() = serverSocket?.isClosed == false
 
     fun start() {
         if (isRunning) return
-        val address = InetAddress.getByName(host)
-        val server = ServerSocket(port, 50, address)
+        if (options.cfProxyEnabled) {
+            if (options.cfProxyUserDomain.isBlank()) {
+                cfBalancer.refreshAsync(executor)
+            } else {
+                cfBalancer.setUserDomain(options.cfProxyUserDomain)
+            }
+        }
+        val address = InetAddress.getByName(options.host)
+        val server = ServerSocket(options.port, 50, address)
         server.reuseAddress = true
         serverSocket = server
-        lastMessage = "Прокси слушает $host:$port"
+        lastMessage = "Прокси слушает ${options.host}:${options.port}"
         executor.execute {
             while (!server.isClosed) {
                 try {
@@ -77,9 +97,15 @@ class TelegramProxy(
         totalConnections = totalConnections.get(),
         wsConnections = wsConnections.get(),
         tcpFallbackConnections = tcpFallbackConnections.get(),
+        cfProxyConnections = cfProxyConnections.get(),
         badConnections = badConnections.get(),
+        maskedConnections = maskedConnections.get(),
         bytesUp = bytesUp.get(),
         bytesDown = bytesDown.get(),
+        proxyLink = proxyLink,
+        plainProxyLink = plainProxyLink,
+        fakeTlsEnabled = options.fakeTlsEnabled,
+        cfProxyEnabled = options.cfProxyEnabled,
         lastMessage = lastMessage
     )
 
@@ -95,9 +121,14 @@ class TelegramProxy(
 
     private fun handleClient(client: Socket) {
         try {
-            BufferedInputStream(client.getInputStream()).use { clientIn ->
-                BufferedOutputStream(client.getOutputStream()).use { clientOut ->
-                    val handshake = clientIn.readExact(HANDSHAKE_LEN)
+            BufferedInputStream(client.getInputStream()).use { rawIn ->
+                BufferedOutputStream(client.getOutputStream()).use { rawOut ->
+                    val fakeTls = FakeTls(secretBytes, options.fakeTlsDomain)
+                    val streams = fakeTls.readClientStreams(rawIn, rawOut) ?: run {
+                        maskedConnections.incrementAndGet()
+                        return
+                    }
+                    val handshake = streams.handshake
                     val parsed = tryHandshake(handshake)
                     if (parsed == null) {
                         badConnections.incrementAndGet()
@@ -113,8 +144,8 @@ class TelegramProxy(
                         MtprotoPacketSplitter(relayInit, parsed.protocolInt)
                     }.getOrNull()
 
-                    if (!bridgeWebSocket(client, dcId, parsed.isMedia, clientIn, clientOut, relayInit, crypto, splitter)) {
-                        bridgeTcpFallback(client, dcId, clientIn, clientOut, relayInit, crypto)
+                    if (!bridgeWebSocket(client, dcId, parsed.isMedia, streams.input, streams.output, relayInit, crypto, splitter)) {
+                        bridgeFallback(client, dcId, parsed.isMedia, streams.input, streams.output, relayInit, crypto, splitter)
                     }
                 }
             }
@@ -131,8 +162,8 @@ class TelegramProxy(
         client: Socket,
         dcId: Int,
         isMedia: Boolean,
-        clientIn: BufferedInputStream,
-        clientOut: BufferedOutputStream,
+        clientIn: InputStream,
+        clientOut: OutputStream,
         relayInit: ByteArray,
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
@@ -159,17 +190,73 @@ class TelegramProxy(
         return false
     }
 
+    private fun bridgeFallback(
+        client: Socket,
+        dcId: Int,
+        isMedia: Boolean,
+        clientIn: InputStream,
+        clientOut: OutputStream,
+        relayInit: ByteArray,
+        crypto: CryptoContext,
+        splitter: MtprotoPacketSplitter?
+    ) {
+        val methods = if (options.cfProxyEnabled && options.cfProxyPriority) {
+            listOf("cf", "tcp")
+        } else if (options.cfProxyEnabled) {
+            listOf("tcp", "cf")
+        } else {
+            listOf("tcp")
+        }
+
+        for (method in methods) {
+            val handled = when (method) {
+                "cf" -> bridgeCfProxyFallback(client, dcId, isMedia, clientIn, clientOut, relayInit, crypto, splitter)
+                else -> bridgeTcpFallback(client, dcId, clientIn, clientOut, relayInit, crypto)
+            }
+            if (handled) return
+        }
+        lastMessage = "Не удалось подключить Telegram DC$dcId"
+    }
+
+    private fun bridgeCfProxyFallback(
+        client: Socket,
+        dcId: Int,
+        isMedia: Boolean,
+        clientIn: InputStream,
+        clientOut: OutputStream,
+        relayInit: ByteArray,
+        crypto: CryptoContext,
+        splitter: MtprotoPacketSplitter?
+    ): Boolean {
+        for (baseDomain in cfBalancer.getDomainsForDc(dcId)) {
+            val domain = "kws${if (dcId == 203) 2 else dcId}.$baseDomain"
+            val ws = try {
+                RawWebSocket.connect(domain, domain)
+            } catch (ignored: Exception) {
+                null
+            } ?: continue
+
+            cfBalancer.markActiveDomain(dcId, baseDomain)
+            cfProxyConnections.incrementAndGet()
+            lastMessage = "Telegram DC$dcId подключен через Cloudflare"
+            ws.sendBinary(relayInit)
+            bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter)
+            return true
+        }
+        return false
+    }
+
     private fun bridgeTcpFallback(
         client: Socket,
         dcId: Int,
-        clientIn: BufferedInputStream,
-        clientOut: BufferedOutputStream,
+        clientIn: InputStream,
+        clientOut: OutputStream,
         relayInit: ByteArray,
         crypto: CryptoContext
-    ) {
+    ): Boolean {
         val targetIp = defaultDcIps[dcId] ?: run {
             lastMessage = "DC$dcId не найден в карте Telegram"
-            return
+            return false
         }
         Socket().use { remote ->
             remote.tcpNoDelay = true
@@ -182,12 +269,13 @@ class TelegramProxy(
             lastMessage = "Telegram DC$dcId подключен напрямую"
             bridgeClientAndTcp(client, remote, clientIn, clientOut, remoteIn, remoteOut, crypto)
         }
+        return true
     }
 
     private fun bridgeClientAndWebSocket(
         client: Socket,
-        clientIn: BufferedInputStream,
-        clientOut: BufferedOutputStream,
+        clientIn: InputStream,
+        clientOut: OutputStream,
         ws: RawWebSocket,
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
@@ -239,10 +327,10 @@ class TelegramProxy(
     private fun bridgeClientAndTcp(
         client: Socket,
         remote: Socket,
-        clientIn: BufferedInputStream,
-        clientOut: BufferedOutputStream,
-        remoteIn: BufferedInputStream,
-        remoteOut: BufferedOutputStream,
+        clientIn: InputStream,
+        clientOut: OutputStream,
+        remoteIn: InputStream,
+        remoteOut: OutputStream,
         crypto: CryptoContext
     ) {
         val done = AtomicInteger(0)
@@ -363,7 +451,7 @@ class TelegramProxy(
 
     private fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
 
-    private val secretBytes: ByteArray by lazy { secretHex.hexToBytes() }
+    private val secretBytes: ByteArray by lazy { options.secretHex.hexToBytes() }
 
     private data class ParsedHandshake(
         val dcId: Int,
@@ -527,17 +615,6 @@ class TelegramProxy(
             } else {
                 listOf("kws$dc.web.telegram.org", "kws$dc-1.web.telegram.org")
             }
-        }
-
-        private fun BufferedInputStream.readExact(length: Int): ByteArray {
-            val data = ByteArray(length)
-            var offset = 0
-            while (offset < length) {
-                val read = read(data, offset, length - offset)
-                if (read < 0) throw java.io.EOFException("Unexpected end of stream")
-                offset += read
-            }
-            return data
         }
 
         private fun littleEndianShort(data: ByteArray, offset: Int): Short {

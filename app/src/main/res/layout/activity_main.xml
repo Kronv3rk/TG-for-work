@@ -109,7 +109,6 @@
                 android:textSize="12sp" />
 
             <TextView
-                android:id="@+id/latencyValue"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
@@ -119,7 +118,6 @@
                 android:textSize="24sp" />
 
             <TextView
-                android:id="@+id/sessionsValue"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
@@ -196,6 +194,7 @@
                     android:textSize="12sp" />
 
                 <TextView
+                    android:id="@+id/sessionsValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
@@ -226,6 +225,7 @@
                     android:textSize="12sp" />
 
                 <TextView
+                    android:id="@+id/protectionValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
@@ -299,7 +299,6 @@
             android:padding="16dp">
 
             <TextView
-                android:id="@+id/protectionValue"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:fontFamily="sans-serif-medium"
@@ -319,8 +318,49 @@
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
                 android:layout_marginTop="14dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/fake_tls_toggle"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+
+                <Switch
+                    android:id="@+id/fakeTlsSwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/cfproxy_toggle"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+
+                <Switch
+                    android:id="@+id/cfProxySwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
                 android:baselineAligned="false"
                 android:orientation="horizontal">
 

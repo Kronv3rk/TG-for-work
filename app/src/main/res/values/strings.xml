@@ -42,4 +42,11 @@
     <string name="proxy_stopped">Прокси остановлен</string>
     <string name="proxy_link_copied">Ссылка скопирована</string>
     <string name="telegram_not_found">Telegram не открылся. Ссылка скопирована.</string>
+    <string name="notification_channel">TG for Work proxy</string>
+    <string name="notification_title">TG for Work работает</string>
+    <string name="notification_open">Telegram</string>
+    <string name="notification_copy">Ссылка</string>
+    <string name="notification_stop">Стоп</string>
+    <string name="fake_tls_toggle">Fake TLS</string>
+    <string name="cfproxy_toggle">Cloudflare fallback</string>
 </resources>

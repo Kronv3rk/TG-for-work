@@ -8,7 +8,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.SecureRandom
 import javax.net.ssl.SNIHostName
-import javax.net.ssl.SSLParameters
+import javax.net.ssl.SNIServerName
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import android.util.Base64
@@ -133,7 +133,7 @@ class RawWebSocket private constructor(
             val ssl = SSLSocketFactory.getDefault()
                 .createSocket(plain, targetIp, 443, true) as SSLSocket
             ssl.sslParameters = ssl.sslParameters.apply {
-                serverNames = listOf(SNIHostName(domain))
+                serverNames = listOf<SNIServerName>(SNIHostName(domain))
             }
             ssl.startHandshake()
             ssl.soTimeout = timeoutMs

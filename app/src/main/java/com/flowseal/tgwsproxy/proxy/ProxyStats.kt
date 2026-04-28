@@ -6,9 +6,15 @@ data class ProxyStats(
     val totalConnections: Int,
     val wsConnections: Int,
     val tcpFallbackConnections: Int,
+    val cfProxyConnections: Int,
     val badConnections: Int,
+    val maskedConnections: Int,
     val bytesUp: Long,
     val bytesDown: Long,
+    val proxyLink: String,
+    val plainProxyLink: String,
+    val fakeTlsEnabled: Boolean,
+    val cfProxyEnabled: Boolean,
     val lastMessage: String
 ) {
     val transferred: String
@@ -21,9 +27,15 @@ data class ProxyStats(
             totalConnections = 0,
             wsConnections = 0,
             tcpFallbackConnections = 0,
+            cfProxyConnections = 0,
             badConnections = 0,
+            maskedConnections = 0,
             bytesUp = 0,
             bytesDown = 0,
+            proxyLink = "",
+            plainProxyLink = "",
+            fakeTlsEnabled = false,
+            cfProxyEnabled = false,
             lastMessage = message
         )
 
