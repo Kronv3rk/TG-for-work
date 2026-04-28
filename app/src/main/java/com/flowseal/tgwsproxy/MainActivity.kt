@@ -27,6 +27,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var routeValue: TextView
     private lateinit var sessionsValue: TextView
     private lateinit var trafficValue: TextView
+    private lateinit var routeStatusValue: TextView
+    private lateinit var routePolicyValue: TextView
+    private lateinit var networkValue: TextView
+    private lateinit var linkModeValue: TextView
     private lateinit var footerBody: TextView
     private lateinit var fakeTlsSwitch: Switch
     private lateinit var cfProxySwitch: Switch
@@ -69,6 +73,10 @@ class MainActivity : AppCompatActivity() {
         routeValue = findViewById(R.id.routeValue)
         sessionsValue = findViewById(R.id.sessionsValue)
         trafficValue = findViewById(R.id.trafficValue)
+        routeStatusValue = findViewById(R.id.routeStatusValue)
+        routePolicyValue = findViewById(R.id.routePolicyValue)
+        networkValue = findViewById(R.id.networkValue)
+        linkModeValue = findViewById(R.id.linkModeValue)
         footerBody = findViewById(R.id.footerBody)
         fakeTlsSwitch = findViewById(R.id.fakeTlsSwitch)
         cfProxySwitch = findViewById(R.id.cfProxySwitch)
@@ -157,9 +165,21 @@ class MainActivity : AppCompatActivity() {
     private fun renderState(stats: ProxyStats) {
         statusBadge.text = if (stats.running) getString(R.string.proxy_running) else getString(R.string.proxy_stopped)
         statusBadge.setBackgroundResource(if (stats.running) R.drawable.bg_status_good else R.drawable.bg_status_idle)
+        statusBadge.setTextColor(colorCompat(if (stats.running) R.color.accent_dark else R.color.text_secondary))
+        statusBadge.compoundDrawables.forEach { drawable ->
+            drawable?.setTint(colorCompat(if (stats.running) R.color.accent_dark else R.color.text_secondary))
+        }
         routeValue.text = routeLabel(stats)
         sessionsValue.text = "${stats.activeConnections}/${stats.totalConnections}"
         trafficValue.text = stats.transferred
+        routeStatusValue.text = stats.routeStatus
+        routePolicyValue.text = stats.routePolicy
+        networkValue.text = stats.networkMode
+        linkModeValue.text = if (stats.fakeTlsEnabled) {
+            getString(R.string.link_mode_fake_tls)
+        } else {
+            getString(R.string.link_mode_mtproto)
+        }
         stopButton.text = getString(if (stats.running) R.string.primary_action_stop else R.string.primary_action_start)
         stopButton.setBackgroundResource(if (stats.running) R.drawable.bg_danger_button else R.drawable.bg_success_button)
         stopButton.setTextColor(colorCompat(if (stats.running) R.color.danger else R.color.white))
@@ -170,12 +190,6 @@ class MainActivity : AppCompatActivity() {
         footerBody.text = buildString {
             append(stats.lastMessage)
             append("\n")
-            append(stats.routeStatus)
-            append("\n")
-            append(stats.routePolicy)
-            append("\n")
-            append(stats.networkMode)
-            append("\n")
             append("Маршруты: WS ")
             append(stats.wsConnections)
             append(" / CF ")
@@ -184,7 +198,7 @@ class MainActivity : AppCompatActivity() {
             append(stats.tcpFallbackConnections)
             if (stats.proxyLink.isNotBlank()) {
                 append("\n")
-                append("Ссылка готова: ")
+                append("Режим ссылки: ")
                 append(if (stats.fakeTlsEnabled) "Fake TLS" else "MTProto")
             }
             if (stats.cfProxyEnabled) {
