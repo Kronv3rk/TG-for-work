@@ -26,6 +26,7 @@ class TelegramProxy(
     private val random = SecureRandom()
     private val executor = Executors.newCachedThreadPool()
     private val cfBalancer = CfProxyBalancer()
+    private val routePlanner = RoutePlanner()
     private val clients = CopyOnWriteArraySet<Socket>()
     private val activeConnections = AtomicInteger(0)
     private val totalConnections = AtomicInteger(0)
@@ -111,6 +112,9 @@ class TelegramProxy(
         plainProxyLink = plainProxyLink,
         fakeTlsEnabled = options.fakeTlsEnabled,
         cfProxyEnabled = options.cfProxyEnabled,
+        routeStatus = routePlanner.status(),
+        routePolicy = routePlanner.policyLabel(options),
+        networkMode = if (options.cellularNetwork) "Мобильная сеть" else "Wi-Fi или локальная сеть",
         lastMessage = lastMessage
     )
 
@@ -149,9 +153,7 @@ class TelegramProxy(
                         MtprotoPacketSplitter(relayInit, parsed.protocolInt)
                     }.getOrNull()
 
-                    if (!bridgeWebSocket(client, dcId, parsed.isMedia, streams.input, streams.output, relayInit, crypto, splitter)) {
-                        bridgeFallback(client, dcId, parsed.isMedia, streams.input, streams.output, relayInit, crypto, splitter)
-                    }
+                    bridgeRoutes(client, dcId, parsed.isMedia, streams.input, streams.output, relayInit, crypto, splitter)
                 }
             }
         } catch (ignored: Exception) {
@@ -161,6 +163,58 @@ class TelegramProxy(
             clients -= client
             runCatching { client.close() }
         }
+    }
+
+    private fun bridgeRoutes(
+        client: Socket,
+        dcId: Int,
+        isMedia: Boolean,
+        clientIn: InputStream,
+        clientOut: OutputStream,
+        relayInit: ByteArray,
+        crypto: CryptoContext,
+        splitter: MtprotoPacketSplitter?
+    ) {
+        val methods = routePlanner.methodsFor(dcId, isMedia, options)
+        for (method in methods) {
+            routePlanner.markTrying(method, dcId, isMedia)
+            lastMessage = routePlanner.status()
+
+            val handled = runCatching {
+                when (method) {
+                    RouteMethod.WEBSOCKET -> bridgeWebSocket(
+                        client,
+                        dcId,
+                        isMedia,
+                        clientIn,
+                        clientOut,
+                        relayInit,
+                        crypto,
+                        splitter
+                    )
+                    RouteMethod.CLOUDFLARE -> bridgeCfProxyFallback(
+                        client,
+                        dcId,
+                        isMedia,
+                        clientIn,
+                        clientOut,
+                        relayInit,
+                        crypto,
+                        splitter
+                    )
+                    RouteMethod.TCP -> bridgeTcpFallback(client, dcId, isMedia, clientIn, clientOut, relayInit, crypto)
+                }
+            }.getOrElse {
+                false
+            }
+
+            if (handled) return
+
+            routePlanner.markFailed(method, dcId, isMedia)
+            lastMessage = routePlanner.status()
+        }
+
+        lastMessage = "Telegram DC$dcId недоступен: все маршруты не ответили"
     }
 
     private fun bridgeWebSocket(
@@ -173,10 +227,6 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ): Boolean {
-        if (options.cellularNetwork && options.cfProxyEnabled) {
-            lastMessage = "Мобильная сеть: прямой WebSocket пропущен, пробуем Cloudflare"
-            return false
-        }
         val targetIp = dcRedirects[dcId] ?: return false
         for (domain in wsDomains(dcId, isMedia)) {
             val ws = try {
@@ -191,40 +241,13 @@ class TelegramProxy(
             } ?: continue
 
             wsConnections.incrementAndGet()
-            lastMessage = "Telegram DC$dcId подключен через WebSocket"
+            routePlanner.markConnected(RouteMethod.WEBSOCKET, dcId, isMedia)
+            lastMessage = routePlanner.status()
             ws.sendBinary(relayInit)
             bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter)
             return true
         }
         return false
-    }
-
-    private fun bridgeFallback(
-        client: Socket,
-        dcId: Int,
-        isMedia: Boolean,
-        clientIn: InputStream,
-        clientOut: OutputStream,
-        relayInit: ByteArray,
-        crypto: CryptoContext,
-        splitter: MtprotoPacketSplitter?
-    ) {
-        val methods = if (options.cfProxyEnabled && options.cfProxyPriority) {
-            listOf("cf", "tcp")
-        } else if (options.cfProxyEnabled) {
-            listOf("tcp", "cf")
-        } else {
-            listOf("tcp")
-        }
-
-        for (method in methods) {
-            val handled = when (method) {
-                "cf" -> bridgeCfProxyFallback(client, dcId, isMedia, clientIn, clientOut, relayInit, crypto, splitter)
-                else -> bridgeTcpFallback(client, dcId, clientIn, clientOut, relayInit, crypto)
-            }
-            if (handled) return
-        }
-        lastMessage = "Не удалось подключить Telegram DC$dcId"
     }
 
     private fun bridgeCfProxyFallback(
@@ -237,8 +260,9 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ): Boolean {
+        val webDc = webDcId(dcId)
         for (baseDomain in cfBalancer.getDomainsForDc(dcId)) {
-            val domain = "kws$dcId.$baseDomain"
+            val domain = "kws$webDc.$baseDomain"
             val ws = try {
                 RawWebSocket.connect(domain, domain)
             } catch (ignored: Exception) {
@@ -247,7 +271,8 @@ class TelegramProxy(
 
             cfBalancer.markActiveDomain(dcId, baseDomain)
             cfProxyConnections.incrementAndGet()
-            lastMessage = "Telegram DC$dcId подключен через Cloudflare"
+            routePlanner.markConnected(RouteMethod.CLOUDFLARE, dcId, isMedia)
+            lastMessage = routePlanner.status()
             ws.sendBinary(relayInit)
             bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter)
             return true
@@ -258,6 +283,7 @@ class TelegramProxy(
     private fun bridgeTcpFallback(
         client: Socket,
         dcId: Int,
+        isMedia: Boolean,
         clientIn: InputStream,
         clientOut: OutputStream,
         relayInit: ByteArray,
@@ -278,7 +304,8 @@ class TelegramProxy(
             remoteOut.write(relayInit)
             remoteOut.flush()
             tcpFallbackConnections.incrementAndGet()
-            lastMessage = "Telegram DC$dcId подключен напрямую"
+            routePlanner.markConnected(RouteMethod.TCP, dcId, isMedia)
+            lastMessage = routePlanner.status()
             bridgeClientAndTcp(client, remote, clientIn, clientOut, remoteIn, remoteOut, crypto)
         }
         return true
@@ -621,13 +648,15 @@ class TelegramProxy(
         }
 
         private fun wsDomains(dcId: Int, media: Boolean): List<String> {
-            val dc = if (dcId == 203) 2 else dcId
+            val dc = webDcId(dcId)
             return if (media) {
                 listOf("kws$dc-1.web.telegram.org", "kws$dc.web.telegram.org")
             } else {
                 listOf("kws$dc.web.telegram.org", "kws$dc-1.web.telegram.org")
             }
         }
+
+        private fun webDcId(dcId: Int): Int = if (dcId == 203) 2 else dcId
 
         private fun littleEndianShort(data: ByteArray, offset: Int): Short {
             return (((data[offset].toInt() and 0xFF) or

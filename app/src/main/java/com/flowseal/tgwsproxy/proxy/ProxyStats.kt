@@ -15,6 +15,9 @@ data class ProxyStats(
     val plainProxyLink: String,
     val fakeTlsEnabled: Boolean,
     val cfProxyEnabled: Boolean,
+    val routeStatus: String,
+    val routePolicy: String,
+    val networkMode: String,
     val lastMessage: String
 ) {
     val transferred: String
@@ -36,6 +39,9 @@ data class ProxyStats(
             plainProxyLink = "",
             fakeTlsEnabled = false,
             cfProxyEnabled = false,
+            routeStatus = "Маршрут ещё не выбран",
+            routePolicy = "Авто: WS > TCP",
+            networkMode = "Сеть не определена",
             lastMessage = message
         )
 

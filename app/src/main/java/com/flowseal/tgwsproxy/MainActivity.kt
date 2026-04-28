@@ -113,7 +113,7 @@ class MainActivity : AppCompatActivity() {
 
         checkConnectionButton.setOnClickListener {
             startProxy(openTelegram = false)
-            Toast.makeText(this, ProxyRuntime.snapshot(this).lastMessage, Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, ProxyRuntime.snapshot(this).routeStatus, Toast.LENGTH_SHORT).show()
         }
 
         stopButton.setOnClickListener {
@@ -136,7 +136,7 @@ class MainActivity : AppCompatActivity() {
         securityRow.setOnClickListener { fakeTlsSwitch.isChecked = !fakeTlsSwitch.isChecked }
         routeRow.setOnClickListener { cfProxySwitch.isChecked = !cfProxySwitch.isChecked }
         profileRow.setOnClickListener {
-            Toast.makeText(this, ProxyRuntime.snapshot(this).lastMessage, Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, ProxyRuntime.snapshot(this).routeStatus, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -161,7 +161,7 @@ class MainActivity : AppCompatActivity() {
         sessionsValue.text = "${stats.activeConnections}/${stats.totalConnections}"
         trafficValue.text = stats.transferred
         stopButton.text = getString(if (stats.running) R.string.primary_action_stop else R.string.primary_action_start)
-        stopButton.setBackgroundResource(if (stats.running) R.drawable.bg_danger_button else R.drawable.bg_primary_button)
+        stopButton.setBackgroundResource(if (stats.running) R.drawable.bg_danger_button else R.drawable.bg_success_button)
         stopButton.setTextColor(colorCompat(if (stats.running) R.color.danger else R.color.white))
         stopButton.compoundDrawables.forEach { drawable ->
             drawable?.setTint(colorCompat(if (stats.running) R.color.danger else R.color.white))
@@ -169,13 +169,26 @@ class MainActivity : AppCompatActivity() {
         stopButton.alpha = 1.0f
         footerBody.text = buildString {
             append(stats.lastMessage)
+            append("\n")
+            append(stats.routeStatus)
+            append("\n")
+            append(stats.routePolicy)
+            append("\n")
+            append(stats.networkMode)
+            append("\n")
+            append("Маршруты: WS ")
+            append(stats.wsConnections)
+            append(" / CF ")
+            append(stats.cfProxyConnections)
+            append(" / TCP ")
+            append(stats.tcpFallbackConnections)
             if (stats.proxyLink.isNotBlank()) {
                 append("\n")
-                append(if (stats.fakeTlsEnabled) "Fake TLS: " else "MTProto: ")
-                append(stats.proxyLink)
+                append("Ссылка готова: ")
+                append(if (stats.fakeTlsEnabled) "Fake TLS" else "MTProto")
             }
             if (stats.cfProxyEnabled) {
-                append("\nCloudflare fallback включён")
+                append("\nCloudflare включён")
             }
         }
     }
@@ -206,13 +219,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun routeLabel(stats: ProxyStats): String {
         return when {
-            stats.cfProxyConnections > 0 -> "CF"
-            stats.wsConnections > 0 -> "WS"
-            stats.tcpFallbackConnections > 0 -> "TCP"
-            stats.cfProxyEnabled && stats.fakeTlsEnabled -> "CF+TLS"
-            stats.cfProxyEnabled -> "CF"
-            stats.fakeTlsEnabled -> "TLS"
-            else -> "TCP"
+            !stats.running -> "Стоп"
+            stats.routeStatus.startsWith("CF") -> "CF"
+            stats.routeStatus.startsWith("WS") -> "WS"
+            stats.routeStatus.startsWith("TCP") -> "TCP"
+            else -> "Авто"
         }
     }
 
