@@ -70,7 +70,10 @@ jobs:
             exit 1
           fi
 
+          set +o pipefail
           yes | "$SDKMANAGER" --licenses >/dev/null
+          set -o pipefail
+
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Configure release signing
