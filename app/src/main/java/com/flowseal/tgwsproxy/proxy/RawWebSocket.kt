@@ -130,8 +130,8 @@ class RawWebSocket private constructor(
             plain.connect(InetSocketAddress(targetIp, 443), timeoutMs)
             plain.soTimeout = timeoutMs
 
-            val ssl = SSLSocketFactory.getDefault()
-                .createSocket(plain, targetIp, 443, true) as SSLSocket
+            val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
+            val ssl = sslFactory.createSocket(plain, domain, 443, true) as SSLSocket
             ssl.sslParameters = ssl.sslParameters.apply {
                 serverNames = listOf<SNIServerName>(SNIHostName(domain))
             }
