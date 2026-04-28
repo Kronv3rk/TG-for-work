@@ -1,11 +1,18 @@
-// Kotlin file content updated here
+package com.flowseal.tgwsproxy.proxy
 
-// ... rest of the file content
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.isActive
 
-while (this@coroutineScope.isActive) { 
-    // some implementation
-}
-
-while (this@coroutineScope.isActive) { 
-    // some implementation
+/**
+ * Minimal bridge loop helper.
+ *
+ * Previous content had placeholder text and top-level `while` blocks,
+ * which makes Kotlin source invalid and breaks APK compilation.
+ */
+object Bridge {
+    suspend fun run(scope: CoroutineScope, block: suspend () -> Unit) {
+        while (scope.isActive) {
+            block()
+        }
+    }
 }
