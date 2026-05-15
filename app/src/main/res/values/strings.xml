@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">TG for Work</string>
-<<<<<<< ours
     <string name="content_app_mark">Логотип TG for Work</string>
     <string name="content_security_illustration">Иллюстрация защищённого рабочего подключения</string>
     <string name="content_status_icon">Статус подключения</string>
@@ -65,6 +64,4 @@
     <string name="cfproxy_enabled">Cloudflare включён</string>
     <string name="cfproxy_disabled">Cloudflare выключен</string>
     <string name="proxy_restarted">Прокси перезапущен</string>
-=======
->>>>>>> theirs
 </resources>

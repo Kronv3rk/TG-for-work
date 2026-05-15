@@ -2,6 +2,7 @@ package com.flowseal.tgwsproxy.proxy
 
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import kotlin.random.Random
 
@@ -11,16 +12,15 @@ class CfProxyBalancer {
     private var dcToDomain: Map<Int, String> = chooseDcDomains(domains)
 
     fun setUserDomain(domain: String) {
-        val clean = domain.trim()
-        if (clean.isBlank()) return
-        updateDomains(listOf(clean))
+        val clean = normalizeDomain(domain) ?: return
+        updateDomains(listOf(clean), minValidDomains = 1)
     }
 
     fun refreshAsync(executor: ExecutorService) {
         executor.execute {
             val fetched = runCatching { fetchDomains() }.getOrDefault(emptyList())
             if (fetched.isNotEmpty()) {
-                updateDomains(fetched)
+                updateDomains(fetched, minValidDomains = MIN_FETCHED_VALID_DOMAINS)
             }
         }
     }
@@ -44,9 +44,9 @@ class CfProxyBalancer {
         }
     }
 
-    private fun updateDomains(newDomains: List<String>) {
-        val unique = newDomains.map(String::trim).filter(String::isNotBlank).distinct()
-        if (unique.isEmpty()) return
+    private fun updateDomains(newDomains: List<String>, minValidDomains: Int) {
+        val unique = newDomains.mapNotNull(::normalizeDomain).distinct()
+        if (unique.size < minValidDomains) return
         synchronized(lock) {
             domains = unique
             dcToDomain = chooseDcDomains(unique)
@@ -61,10 +61,17 @@ class CfProxyBalancer {
             requestMethod = "GET"
             setRequestProperty("User-Agent", "TG-for-Work-Android")
         }
-        return connection.inputStream.bufferedReader().useLines { lines ->
-            lines.map(String::trim)
-                .filter { it.isNotBlank() && !it.startsWith("#") }
+        return connection.inputStream.bufferedReader().use { reader ->
+            reader.readText()
+                .lineSequence()
+                .flatMap { line ->
+                    line.substringBefore("#")
+                        .trim()
+                        .splitToSequence(WHITESPACE_REGEX)
+                }
+                .filter(String::isNotBlank)
                 .map(::decodeDomain)
+                .mapNotNull(::normalizeDomain)
                 .distinct()
                 .toList()
         }
@@ -78,6 +85,8 @@ class CfProxyBalancer {
     companion object {
         private const val CFPROXY_DOMAINS_URL =
             "https://raw.githubusercontent.com/Flowseal/tg-ws-proxy/main/.github/cfproxy-domains.txt"
+        private const val MIN_FETCHED_VALID_DOMAINS = 3
+        private val WHITESPACE_REGEX = Regex("\\s+")
         private val DEFAULT_ENCODED_DOMAINS = listOf(
             "virkgj.com",
             "vmmzovy.com",
@@ -86,13 +95,16 @@ class CfProxyBalancer {
             "twdmbzcm.com",
             "awzwsldi.com",
             "clngqrflngqin.com",
-            "tjacxbqtj.com"
+            "tjacxbqtj.com",
+            "bxaxtxmrw.com",
+            "dmohrsgmohcrwb.com"
         )
         private const val DECODED_SUFFIX = ".co.uk"
 
         fun decodeDomain(value: String): String {
-            if (!value.endsWith(".com")) return value
-            val prefix = value.removeSuffix(".com")
+            val clean = value.trim()
+            if (!clean.endsWith(".com")) return clean
+            val prefix = clean.removeSuffix(".com")
             val shift = prefix.count(Char::isLetter)
             val decoded = prefix.map { char ->
                 if (!char.isLetter()) {
@@ -103,6 +115,26 @@ class CfProxyBalancer {
                 }
             }.joinToString("")
             return decoded + DECODED_SUFFIX
+        }
+
+        fun normalizeDomain(value: String): String? {
+            val domain = value.trim().lowercase(Locale.US)
+            if (!isValidDomain(domain)) return null
+            return domain
+        }
+
+        fun isValidDomain(domain: String): Boolean {
+            if (domain.isBlank() || domain.length > 253) return false
+            if (domain.startsWith('.') || domain.endsWith('.')) return false
+            val labels = domain.split('.')
+            if (labels.size < 2) return false
+            for (label in labels) {
+                if (label.isBlank() || label.length > 63) return false
+                if (label.startsWith('-') || label.endsWith('-')) return false
+                if (!label.all { it.isLetterOrDigit() || it == '-' }) return false
+            }
+            val tld = labels.last()
+            return tld.length >= 2 && tld.any(Char::isLetter)
         }
 
         private fun Int.floorMod(mod: Int): Int = ((this % mod) + mod) % mod

@@ -1,6 +1,5 @@
 package com.flowseal.tgwsproxy
 
-<<<<<<< ours
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
@@ -273,14 +272,5 @@ class MainActivity : AppCompatActivity() {
             @Suppress("DEPRECATION")
             resources.getColor(id)
         }
-=======
-import android.app.Activity
-import android.os.Bundle
-
-class MainActivity : Activity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
->>>>>>> theirs
     }
 }

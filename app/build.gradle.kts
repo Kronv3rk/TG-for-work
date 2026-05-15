@@ -1,5 +1,4 @@
 plugins {
-<<<<<<< ours
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
@@ -15,12 +14,6 @@ val hasReleaseSigning = listOf(
     releaseKeyPassword
 ).all { !it.isNullOrBlank() }
 
-=======
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-}
-
->>>>>>> theirs
 android {
     namespace = "com.flowseal.tgwsproxy"
     compileSdk = 35
@@ -29,9 +22,8 @@ android {
         applicationId = "com.flowseal.tgwsproxy"
         minSdk = 24
         targetSdk = 35
-<<<<<<< ours
-        versionCode = 9
-        versionName = "1.6.0"
+        versionCode = 10
+        versionName = "1.6.6"
     }
 
     signingConfigs {
@@ -43,31 +35,17 @@ android {
                 keyPassword = releaseKeyPassword
             }
         }
-=======
-        versionCode = 1
-        versionName = "1.0"
-    }
-
-    buildFeatures {
-        buildConfig = false
->>>>>>> theirs
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-<<<<<<< ours
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
-=======
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro",
->>>>>>> theirs
             )
         }
     }
@@ -79,26 +57,10 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
-<<<<<<< ours
-=======
-        freeCompilerArgs += listOf(
-            "-Xjsr305=strict",
-        )
-    }
-
-    lint {
-        abortOnError = true
-        checkDependencies = true
-        warningsAsErrors = true
->>>>>>> theirs
     }
 }
 
 dependencies {
-<<<<<<< ours
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-=======
-    implementation(libs.kotlinx.coroutines.android)
->>>>>>> theirs
 }
