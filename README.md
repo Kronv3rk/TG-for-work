@@ -14,6 +14,21 @@ gradle :app:assembleDebug
 
 Если SDK не настроен, укажите `ANDROID_SDK_ROOT` и примите лицензии Android SDK.
 
+## Почему изменения и релизы не появляются автоматически
+
+Изменения в этой ветке становятся видны на GitHub только после push/merge ветки в удалённый репозиторий.
+GitHub Release с APK не создаётся от обычного коммита: workflow `.github/workflows/android-release.yml`
+запускается только при push тега вида `v1.0.0` или вручную через GitHub Actions.
+
+Чтобы опубликовать новый APK в Releases после merge нужных изменений:
+
+```bash
+git tag v1.6.1
+git push origin v1.6.1
+```
+
+Либо откройте GitHub Actions -> Android Release -> Run workflow и укажите тег вида `v1.6.1`.
+
 ## Релизы через GitHub Actions
 
 APK собирается в GitHub Actions и публикуется на странице Releases при пуше тега:
