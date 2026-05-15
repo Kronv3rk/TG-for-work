@@ -51,10 +51,13 @@ class RawWebSocket private constructor(
                 length = readUnsignedShort()
             } else if (length == 127) {
                 val longLength = readLong()
-                if (longLength > Int.MAX_VALUE) {
+                if (longLength > MAX_FRAME_SIZE) {
                     throw IllegalStateException("Frame is too large")
                 }
                 length = longLength.toInt()
+            }
+            if (length > MAX_FRAME_SIZE) {
+                throw IllegalStateException("Frame is too large")
             }
 
             val mask = if ((second and 0x80) != 0) readExact(4) else null
@@ -123,61 +126,76 @@ class RawWebSocket private constructor(
         private const val OP_PING = 0x9
         private const val OP_PONG = 0xA
         private const val BUFFER_SIZE = 256 * 1024
+        private const val MAX_FRAME_SIZE = 8 * 1024 * 1024
+        private const val MAX_HEADER_BYTES = 32 * 1024
         private val random = SecureRandom()
 
         fun connect(targetIp: String, domain: String, timeoutMs: Int = 10_000): RawWebSocket {
             val plain = Socket()
-            plain.tcpNoDelay = true
-            plain.keepAlive = true
-            plain.receiveBufferSize = BUFFER_SIZE
-            plain.sendBufferSize = BUFFER_SIZE
-            plain.connect(InetSocketAddress(targetIp, 443), timeoutMs)
-            plain.soTimeout = timeoutMs
+            var ssl: SSLSocket? = null
+            try {
+                plain.tcpNoDelay = true
+                plain.keepAlive = true
+                plain.receiveBufferSize = BUFFER_SIZE
+                plain.sendBufferSize = BUFFER_SIZE
+                plain.connect(InetSocketAddress(targetIp, 443), timeoutMs)
+                plain.soTimeout = timeoutMs
 
-            val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
-            val ssl = sslFactory.createSocket(plain, domain, 443, true) as SSLSocket
-            ssl.sslParameters = ssl.sslParameters.apply {
-                serverNames = listOf<SNIServerName>(SNIHostName(domain))
+                val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
+                val connectedSsl = sslFactory.createSocket(plain, domain, 443, true) as SSLSocket
+                ssl = connectedSsl
+                connectedSsl.sslParameters = connectedSsl.sslParameters.apply {
+                    serverNames = listOf<SNIServerName>(SNIHostName(domain))
+                }
+                connectedSsl.startHandshake()
+                connectedSsl.soTimeout = timeoutMs
+
+                val input = BufferedInputStream(connectedSsl.inputStream)
+                val output = BufferedOutputStream(connectedSsl.outputStream)
+                val keyBytes = ByteArray(16).also(random::nextBytes)
+                val wsKey = Base64.encodeToString(keyBytes, Base64.NO_WRAP)
+                val request = buildString {
+                    append("GET /apiws HTTP/1.1\r\n")
+                    append("Host: ").append(domain).append("\r\n")
+                    append("Upgrade: websocket\r\n")
+                    append("Connection: Upgrade\r\n")
+                    append("Sec-WebSocket-Key: ").append(wsKey).append("\r\n")
+                    append("Sec-WebSocket-Version: 13\r\n")
+                    append("Sec-WebSocket-Protocol: binary\r\n")
+                    append("\r\n")
+                }
+
+                output.write(request.toByteArray(Charsets.US_ASCII))
+                output.flush()
+
+                val lines = readHttpHeaders(input)
+                val firstLine = lines.firstOrNull().orEmpty()
+                val status = firstLine.split(" ").getOrNull(1)?.toIntOrNull() ?: 0
+                if (status != 101) {
+                    runCatching { connectedSsl.close() }
+                    throw WebSocketHandshakeException(status, firstLine.ifBlank { "Empty WebSocket response" })
+                }
+
+                connectedSsl.soTimeout = 0
+                return RawWebSocket(connectedSsl, input, output)
+            } catch (error: Exception) {
+                runCatching { ssl?.close() }
+                runCatching { plain.close() }
+                throw error
             }
-            ssl.startHandshake()
-            ssl.soTimeout = timeoutMs
-
-            val input = BufferedInputStream(ssl.inputStream)
-            val output = BufferedOutputStream(ssl.outputStream)
-            val keyBytes = ByteArray(16).also(random::nextBytes)
-            val wsKey = Base64.encodeToString(keyBytes, Base64.NO_WRAP)
-            val request = buildString {
-                append("GET /apiws HTTP/1.1\r\n")
-                append("Host: ").append(domain).append("\r\n")
-                append("Upgrade: websocket\r\n")
-                append("Connection: Upgrade\r\n")
-                append("Sec-WebSocket-Key: ").append(wsKey).append("\r\n")
-                append("Sec-WebSocket-Version: 13\r\n")
-                append("Sec-WebSocket-Protocol: binary\r\n")
-                append("\r\n")
-            }
-
-            output.write(request.toByteArray(Charsets.US_ASCII))
-            output.flush()
-
-            val lines = readHttpHeaders(input)
-            val firstLine = lines.firstOrNull().orEmpty()
-            val status = firstLine.split(" ").getOrNull(1)?.toIntOrNull() ?: 0
-            if (status != 101) {
-                runCatching { ssl.close() }
-                throw WebSocketHandshakeException(status, firstLine.ifBlank { "Empty WebSocket response" })
-            }
-
-            ssl.soTimeout = 0
-            return RawWebSocket(ssl, input, output)
         }
 
         private fun readHttpHeaders(input: BufferedInputStream): List<String> {
             val result = mutableListOf<String>()
             val line = StringBuilder()
+            var bytesRead = 0
             while (true) {
                 val ch = input.read()
                 if (ch < 0) break
+                bytesRead++
+                if (bytesRead > MAX_HEADER_BYTES) {
+                    throw WebSocketHandshakeException(0, "WebSocket response headers are too large")
+                }
                 if (ch == '\n'.code) {
                     val text = line.toString().trimEnd('\r')
                     if (text.isEmpty()) break
