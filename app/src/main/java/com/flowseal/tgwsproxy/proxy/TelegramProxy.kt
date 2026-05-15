@@ -11,7 +11,12 @@ import java.net.Socket
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.CopyOnWriteArraySet
-import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import javax.crypto.Cipher
@@ -24,7 +29,7 @@ class TelegramProxy(
     private val options: ProxyOptions
 ) : Closeable {
     private val random = SecureRandom()
-    private val executor = Executors.newCachedThreadPool()
+    private val executor = newProxyExecutor()
     private val cfBalancer = CfProxyBalancer()
     private val routePlanner = RoutePlanner()
     private val clients = CopyOnWriteArraySet<Socket>()
@@ -87,7 +92,15 @@ class TelegramProxy(
                     clients += socket
                     totalConnections.incrementAndGet()
                     activeConnections.incrementAndGet()
-                    executor.execute { handleClient(socket) }
+                    try {
+                        executor.execute { handleClient(socket) }
+                    } catch (rejected: RejectedExecutionException) {
+                        activeConnections.decrementAndGet()
+                        badConnections.incrementAndGet()
+                        clients -= socket
+                        lastMessage = "Слишком много соединений: новое соединение отклонено"
+                        runCatching { socket.close() }
+                    }
                 } catch (ignored: Exception) {
                     if (!server.isClosed) {
                         lastMessage = "Ошибка локального сервера: ${ignored.message ?: "unknown"}"
@@ -126,6 +139,7 @@ class TelegramProxy(
             runCatching { client.close() }
         }
         clients.clear()
+        executor.shutdownNow()
     }
 
     private fun handleClient(client: Socket) {
@@ -632,6 +646,7 @@ class TelegramProxy(
             2 to "149.154.167.220",
             4 to "149.154.167.220"
         )
+        private const val MAX_PROXY_THREADS = 96
         private val defaultDcIps = mapOf(
             1 to "149.154.175.50",
             2 to "149.154.167.51",
@@ -640,6 +655,27 @@ class TelegramProxy(
             5 to "149.154.171.5",
             203 to "91.105.192.100"
         )
+
+
+        private fun newProxyExecutor(): ExecutorService {
+            val threadNumber = AtomicInteger(1)
+            val factory = ThreadFactory { task ->
+                Thread(task, "tg-proxy-${threadNumber.getAndIncrement()}").apply {
+                    isDaemon = true
+                }
+            }
+            return ThreadPoolExecutor(
+                0,
+                MAX_PROXY_THREADS,
+                30L,
+                TimeUnit.SECONDS,
+                SynchronousQueue<Runnable>(),
+                factory,
+                ThreadPoolExecutor.AbortPolicy()
+            ).apply {
+                allowCoreThreadTimeOut(true)
+            }
+        }
 
         fun generateSecret(): String {
             val bytes = ByteArray(16)

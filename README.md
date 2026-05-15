@@ -1,5 +1,6 @@
 # TG-for-work
 
+<<<<<<< ours
 Android-порт схемы Flowseal tg-ws-proxy для запуска локального MTProto proxy на телефоне.
 Приложение открывает Telegram с готовой `tg://proxy` ссылкой, держит прокси в foreground service
 и показывает постоянное уведомление с быстрыми действиями.
@@ -13,6 +14,21 @@ gradle :app:assembleDebug
 ```
 
 Если SDK не настроен, укажите `ANDROID_SDK_ROOT` и примите лицензии Android SDK.
+
+## Почему изменения и релизы не появляются автоматически
+
+Изменения в этой ветке становятся видны на GitHub только после push/merge ветки в удалённый репозиторий.
+GitHub Release с APK не создаётся от обычного коммита: workflow `.github/workflows/android-release.yml`
+запускается только при push тега вида `v1.0.0` или вручную через GitHub Actions.
+
+Чтобы опубликовать новый APK в Releases после merge нужных изменений:
+
+```bash
+git tag v1.6.1
+git push origin v1.6.1
+```
+
+Либо откройте GitHub Actions -> Android Release -> Run workflow и укажите тег вида `v1.6.1`.
 
 ## Релизы через GitHub Actions
 
@@ -95,3 +111,58 @@ Android не обновляет приложение поверх версии �
 Если Telegram не открылся автоматически, нажмите `Скопировать`, отправьте ссылку себе в Telegram и откройте её из клиента.
 
 На Android нет desktop tray, поэтому его роль выполняет foreground notification.
+=======
+Минимальный Android-проект для сборки APK.
+
+## Требования
+
+- JDK 17.
+- Android SDK с установленным `platforms;android-35`.
+- Доступ к `google()`, `mavenCentral()` и `services.gradle.org` для первой загрузки Gradle/плагинов.
+
+## Быстрый старт
+
+```bash
+./gradlew :app:assembleDebug
+```
+
+Готовый debug APK появится в `app/build/outputs/apk/debug/`.
+
+Если SDK не настроен, укажите `ANDROID_SDK_ROOT` и примите лицензии Android SDK:
+
+```bash
+sdkmanager --licenses
+```
+
+## Проверки перед Pull Request
+
+```bash
+./gradlew :app:assembleDebug
+./gradlew :app:lintDebug
+```
+
+## GitHub
+
+1. Запушьте ветку с изменениями.
+2. Откройте Pull Request в `main`.
+3. Дождитесь прохождения workflow `Android CI`.
+4. После merge скачайте APK из artifacts workflow или соберите локально командой выше.
+
+## Автоматическая синхронизация ветки Codex
+
+Если кнопка Codex **«Применить»** показывает конфликты, синхронизируйте локальную папку с веткой `work` одной командой из корня проекта:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\sync-codex-work.ps1
+```
+
+Скрипт сохранит незакоммиченные локальные изменения в `git stash`, настроит `origin`, заберёт `origin/work` и переключит проект на эту ветку. Если нужно полностью удалить локальные незакоммиченные изменения, добавьте флаг `-DiscardLocalChanges`.
+
+## Диагностика ошибки Telegram Proxy
+
+Если Telegram показывает сообщение, что прокси использует некорректные настройки и будет отключён, проверьте host/port/secret и тип прокси по чеклисту в [`docs/TELEGRAM_PROXY_TROUBLESHOOTING.md`](docs/TELEGRAM_PROXY_TROUBLESHOOTING.md).
+
+## Полезные материалы для agent-skills
+
+См. [`docs/SKILLS.md`](docs/SKILLS.md) — там собраны подходящие навыки и источники, которые стоит использовать для дальнейшего аудита Android/Kotlin/Gradle проекта.
+>>>>>>> theirs
