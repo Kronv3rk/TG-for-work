@@ -57,8 +57,6 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.7"
 
       - name: Install Android SDK packages
         shell: bash
@@ -113,13 +111,14 @@ jobs:
         shell: bash
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
+          chmod +x ./gradlew
 
           if [[ "${{ steps.signing.outputs.enabled }}" == "true" ]]; then
-            gradle :app:assembleRelease --no-daemon
+            ./gradlew :app:assembleRelease --no-daemon --stacktrace
             APK_PATH="$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)"
             APK_KIND="release-signed"
           else
-            gradle :app:assembleDebug --no-daemon
+            ./gradlew :app:assembleDebug --no-daemon --stacktrace
             APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)"
             APK_KIND="debug"
           fi
