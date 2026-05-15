@@ -32,8 +32,8 @@ class RoutePlanner {
 
     fun policyLabel(options: ProxyOptions): String {
         return when {
-            options.cellularNetwork && options.cfProxyEnabled -> "Авто: мобильная сеть, CF > TCP > WS"
-            options.cellularNetwork -> "Авто: мобильная сеть, TCP > WS"
+            options.cellularNetwork && options.cfProxyEnabled -> "Авто: мобильная сеть, CF > WS > TCP"
+            options.cellularNetwork -> "Авто: мобильная сеть, WS > TCP"
             options.cfProxyEnabled -> "Авто: WS, CF для медиа, TCP запасной"
             else -> "Авто: WS > TCP"
         }
@@ -60,10 +60,10 @@ class RoutePlanner {
         return when {
             options.cellularNetwork && options.cfProxyEnabled -> listOf(
                 RouteMethod.CLOUDFLARE,
-                RouteMethod.TCP,
-                RouteMethod.WEBSOCKET
+                RouteMethod.WEBSOCKET,
+                RouteMethod.TCP
             )
-            options.cellularNetwork -> listOf(RouteMethod.TCP, RouteMethod.WEBSOCKET)
+            options.cellularNetwork -> listOf(RouteMethod.WEBSOCKET, RouteMethod.TCP)
             options.cfProxyEnabled && isMedia && options.cfProxyPriority -> listOf(
                 RouteMethod.CLOUDFLARE,
                 RouteMethod.WEBSOCKET,

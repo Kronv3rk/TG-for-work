@@ -211,7 +211,8 @@ private fun InputStream.readExact(length: Int): ByteArray {
 }
 
 class FakeTlsInputStream(private val raw: InputStream) : InputStream() {
-    private val buffer = ArrayList<Byte>()
+    private var buffer = ByteArray(0)
+    private var bufferOffset = 0
     private var readLeft = 0
 
     override fun read(): Int {
@@ -221,21 +222,24 @@ class FakeTlsInputStream(private val raw: InputStream) : InputStream() {
     }
 
     override fun read(target: ByteArray, offset: Int, length: Int): Int {
-        if (buffer.isEmpty()) {
-            val payload = readTlsPayload()
-            if (payload.isEmpty()) return -1
-            payload.forEach { buffer += it }
+        if (bufferOffset >= buffer.size) {
+            buffer = readTlsPayload()
+            bufferOffset = 0
+            if (buffer.isEmpty()) return -1
         }
-        val count = minOf(length, buffer.size)
-        repeat(count) { index ->
-            target[offset + index] = buffer.removeAt(0)
+        val count = minOf(length, buffer.size - bufferOffset)
+        System.arraycopy(buffer, bufferOffset, target, offset, count)
+        bufferOffset += count
+        if (bufferOffset >= buffer.size) {
+            buffer = ByteArray(0)
+            bufferOffset = 0
         }
         return count
     }
 
     private fun readTlsPayload(): ByteArray {
         if (readLeft > 0) {
-            val chunk = ByteArray(readLeft)
+            val chunk = ByteArray(minOf(readLeft, BUFFER_SIZE))
             val read = raw.read(chunk)
             if (read <= 0) return ByteArray(0)
             readLeft -= read
@@ -251,13 +255,19 @@ class FakeTlsInputStream(private val raw: InputStream) : InputStream() {
                 continue
             }
             if (type != 0x17) return ByteArray(0)
-            val readLength = minOf(recordLength, 65_536)
+            if (recordLength <= 0 || recordLength > TLS_RECORD_MAX) return ByteArray(0)
+            val readLength = minOf(recordLength, BUFFER_SIZE)
             val data = ByteArray(readLength)
             val read = raw.read(data)
             if (read <= 0) return ByteArray(0)
             readLeft = recordLength - read
             return data.copyOf(read)
         }
+    }
+
+    private companion object {
+        private const val TLS_RECORD_MAX = 65_535
+        private const val BUFFER_SIZE = 16 * 1024
     }
 }
 

@@ -274,9 +274,8 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ): Boolean {
-        val webDc = webDcId(dcId)
         for (baseDomain in cfBalancer.getDomainsForDc(dcId)) {
-            val domain = "kws$webDc.$baseDomain"
+            val domain = "kws$dcId.$baseDomain"
             val ws = try {
                 RawWebSocket.connect(domain, domain)
             } catch (ignored: Exception) {
@@ -334,7 +333,31 @@ class TelegramProxy(
         splitter: MtprotoPacketSplitter?
     ) {
         val done = AtomicInteger(0)
-        val up = executor.submit {
+        val down = try {
+            executor.submit {
+                try {
+                    while (done.get() == 0) {
+                        val data = ws.receive() ?: break
+                        bytesDown.addAndGet(data.size.toLong())
+                        val plain = crypto.telegramDecrypt.update(data)
+                        val encrypted = crypto.clientEncrypt.update(plain)
+                        clientOut.write(encrypted)
+                        clientOut.flush()
+                    }
+                } finally {
+                    done.set(1)
+                    runCatching { ws.close() }
+                    runCatching { client.close() }
+                }
+            }
+        } catch (rejected: RejectedExecutionException) {
+            lastMessage = "Слишком много соединений: канал загрузки отклонён"
+            runCatching { ws.close() }
+            runCatching { client.close() }
+            throw rejected
+        }
+
+        try {
             val buffer = ByteArray(BUFFER_SIZE)
             try {
                 while (done.get() == 0) {
@@ -354,27 +377,9 @@ class TelegramProxy(
                 runCatching { ws.close() }
                 runCatching { client.close() }
             }
+        } finally {
+            runCatching { down.cancel(true) }
         }
-
-        val down = executor.submit {
-            try {
-                while (done.get() == 0) {
-                    val data = ws.receive() ?: break
-                    bytesDown.addAndGet(data.size.toLong())
-                    val plain = crypto.telegramDecrypt.update(data)
-                    val encrypted = crypto.clientEncrypt.update(plain)
-                    clientOut.write(encrypted)
-                    clientOut.flush()
-                }
-            } finally {
-                done.set(1)
-                runCatching { ws.close() }
-                runCatching { client.close() }
-            }
-        }
-
-        runCatching { up.get() }
-        runCatching { down.cancel(true) }
     }
 
     private fun bridgeClientAndTcp(
@@ -387,7 +392,32 @@ class TelegramProxy(
         crypto: CryptoContext
     ) {
         val done = AtomicInteger(0)
-        val up = executor.submit {
+        val down = try {
+            executor.submit {
+                val buffer = ByteArray(BUFFER_SIZE)
+                try {
+                    while (done.get() == 0) {
+                        val read = remoteIn.read(buffer)
+                        if (read < 0) break
+                        bytesDown.addAndGet(read.toLong())
+                        val plain = crypto.telegramDecrypt.update(buffer, 0, read)
+                        clientOut.write(crypto.clientEncrypt.update(plain))
+                        clientOut.flush()
+                    }
+                } finally {
+                    done.set(1)
+                    runCatching { client.close() }
+                    runCatching { remote.close() }
+                }
+            }
+        } catch (rejected: RejectedExecutionException) {
+            lastMessage = "Слишком много соединений: канал загрузки отклонён"
+            runCatching { client.close() }
+            runCatching { remote.close() }
+            throw rejected
+        }
+
+        try {
             val buffer = ByteArray(BUFFER_SIZE)
             try {
                 while (done.get() == 0) {
@@ -403,26 +433,9 @@ class TelegramProxy(
                 runCatching { client.close() }
                 runCatching { remote.close() }
             }
+        } finally {
+            runCatching { down.cancel(true) }
         }
-        val down = executor.submit {
-            val buffer = ByteArray(BUFFER_SIZE)
-            try {
-                while (done.get() == 0) {
-                    val read = remoteIn.read(buffer)
-                    if (read < 0) break
-                    bytesDown.addAndGet(read.toLong())
-                    val plain = crypto.telegramDecrypt.update(buffer, 0, read)
-                    clientOut.write(crypto.clientEncrypt.update(plain))
-                    clientOut.flush()
-                }
-            } finally {
-                done.set(1)
-                runCatching { client.close() }
-                runCatching { remote.close() }
-            }
-        }
-        runCatching { up.get() }
-        runCatching { down.cancel(true) }
     }
 
     private fun tryHandshake(handshake: ByteArray): ParsedHandshake? {
@@ -526,8 +539,8 @@ class TelegramProxy(
             relayInit.copyOfRange(SKIP_LEN, SKIP_LEN + KEY_LEN),
             relayInit.copyOfRange(SKIP_LEN + KEY_LEN, SKIP_LEN + KEY_LEN + IV_LEN)
         )
-        private val cipherBuffer = ArrayList<Byte>()
-        private val plainBuffer = ArrayList<Byte>()
+        private var cipherBuffer = ByteArray(0)
+        private var plainBuffer = ByteArray(0)
         private var disabled = false
 
         init {
@@ -539,34 +552,39 @@ class TelegramProxy(
             if (disabled) return listOf(chunk)
 
             val plain = decrypt.update(chunk)
-            chunk.forEach { cipherBuffer += it }
-            plain.forEach { plainBuffer += it }
+            cipherBuffer = cipherBuffer.append(chunk)
+            plainBuffer = plainBuffer.append(plain)
 
             val parts = mutableListOf<ByteArray>()
             while (cipherBuffer.isNotEmpty()) {
                 val packetLength = nextPacketLength() ?: break
-                if (packetLength <= 0) {
-                    parts += cipherBuffer.toByteArray()
-                    cipherBuffer.clear()
-                    plainBuffer.clear()
+                if (packetLength <= 0 || packetLength > MAX_MTPROTO_PACKET_SIZE) {
+                    parts += cipherBuffer
+                    clearBuffers()
                     disabled = true
                     break
                 }
-                parts += cipherBuffer.take(packetLength).toByteArray()
-                repeat(packetLength) {
-                    cipherBuffer.removeAt(0)
-                    plainBuffer.removeAt(0)
-                }
+                parts += cipherBuffer.copyOfRange(0, packetLength)
+                consume(packetLength)
             }
             return parts
         }
 
         fun flush(): List<ByteArray> {
             if (cipherBuffer.isEmpty()) return emptyList()
-            val tail = cipherBuffer.toByteArray()
-            cipherBuffer.clear()
-            plainBuffer.clear()
+            val tail = cipherBuffer
+            clearBuffers()
             return listOf(tail)
+        }
+
+        private fun consume(length: Int) {
+            cipherBuffer = cipherBuffer.copyOfRange(length, cipherBuffer.size)
+            plainBuffer = plainBuffer.copyOfRange(length, plainBuffer.size)
+        }
+
+        private fun clearBuffers() {
+            cipherBuffer = ByteArray(0)
+            plainBuffer = ByteArray(0)
         }
 
         private fun nextPacketLength(): Int? {
@@ -594,7 +612,7 @@ class TelegramProxy(
                 payloadLength = (first and 0x7F) * 4
                 headerLength = 1
             }
-            if (payloadLength <= 0) return 0
+            if (payloadLength <= 0 || payloadLength > MAX_MTPROTO_PACKET_SIZE) return 0
             val packetLength = headerLength + payloadLength
             return if (plainBuffer.size >= packetLength) packetLength else null
         }
@@ -607,9 +625,16 @@ class TelegramProxy(
                     ((plainBuffer[2].toInt() and 0xFF) shl 16) or
                     ((plainBuffer[3].toInt() and 0x7F) shl 24)
                 )
-            if (payloadLength <= 0) return 0
+            if (payloadLength <= 0 || payloadLength > MAX_MTPROTO_PACKET_SIZE) return 0
             val packetLength = 4 + payloadLength
             return if (plainBuffer.size >= packetLength) packetLength else null
+        }
+
+        private fun ByteArray.append(chunk: ByteArray): ByteArray {
+            if (isEmpty()) return chunk.copyOf()
+            val combined = copyOf(size + chunk.size)
+            System.arraycopy(chunk, 0, combined, size, chunk.size)
+            return combined
         }
     }
 
@@ -617,6 +642,7 @@ class TelegramProxy(
         const val DEFAULT_HOST = "127.0.0.1"
         const val DEFAULT_PORT = 1443
         private const val BUFFER_SIZE = 256 * 1024
+        private const val MAX_MTPROTO_PACKET_SIZE = 8 * 1024 * 1024
         private const val HANDSHAKE_LEN = 64
         private const val SKIP_LEN = 8
         private const val PREKEY_LEN = 32
