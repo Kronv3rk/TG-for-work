@@ -17,6 +17,8 @@ data class ProxyStats(
     val cfProxyEnabled: Boolean,
     val routeStatus: String,
     val routePolicy: String,
+    val routeHealth: String,
+    val recentEvents: List<String>,
     val networkMode: String,
     val lastMessage: String
 ) {
@@ -41,6 +43,8 @@ data class ProxyStats(
             cfProxyEnabled = false,
             routeStatus = "Маршрут ещё не выбран",
             routePolicy = "Авто: WS > TCP",
+            routeHealth = "WS — · CF — · TCP —",
+            recentEvents = ConnectionLog.recent(8),
             networkMode = "Сеть не определена",
             lastMessage = message
         )

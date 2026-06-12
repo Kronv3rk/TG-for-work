@@ -7,10 +7,12 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.util.Log
 import android.widget.Toast
 import com.flowseal.tgwsproxy.R
 
 object ProxyRuntime {
+    private const val LOG_TAG = "TgForWork"
     private const val PREFS = "proxy"
     private const val KEY_SECRET = "secret"
     private const val KEY_FAKE_TLS_DOMAIN = "fake_tls_domain"
@@ -23,6 +25,11 @@ object ProxyRuntime {
 
     @Synchronized
     fun start(context: Context): TelegramProxy {
+        // Mirror connection journal lines to Logcat so stability issues can be
+        // investigated with `adb logcat -s TgForWork` even without the UI open.
+        if (ConnectionLog.sink == null) {
+            ConnectionLog.sink = { line -> Log.i(LOG_TAG, line) }
+        }
         val options = loadOptions(context.applicationContext)
         val existing = proxy
         if (existing != null) {
