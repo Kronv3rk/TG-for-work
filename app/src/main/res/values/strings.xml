@@ -43,8 +43,13 @@
     <string name="link_mode_label">Ссылка</string>
     <string name="link_mode_fake_tls">Fake TLS</string>
     <string name="link_mode_mtproto">MTProto</string>
-    <string name="footer_title">Журнал</string>
+    <string name="footer_title">Журнал подключений</string>
     <string name="footer_body">Здесь появятся последние события прокси.</string>
+    <string name="route_health_empty">Качество: WS — · CF — · TCP —</string>
+    <string name="route_health_prefix">Качество: %1$s</string>
+    <string name="log_empty">События появятся после первого подключения.</string>
+    <string name="log_hint">Нажмите и удерживайте журнал, чтобы скопировать его целиком.</string>
+    <string name="log_copied">Журнал скопирован в буфер обмена</string>
     <string name="settings_action">Скопировать</string>
     <string name="logs_action">Перезапуск</string>
     <string name="proxy_running">Работает</string>

@@ -1,5 +1,8 @@
 package com.flowseal.tgwsproxy
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
@@ -8,11 +11,12 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.Button
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.appcompat.widget.SwitchCompat
+import com.flowseal.tgwsproxy.proxy.ConnectionLog
 import com.flowseal.tgwsproxy.proxy.ProxyRuntime
 import com.flowseal.tgwsproxy.proxy.ProxyStats
 
@@ -32,8 +36,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var networkValue: TextView
     private lateinit var linkModeValue: TextView
     private lateinit var footerBody: TextView
-    private lateinit var fakeTlsSwitch: Switch
-    private lateinit var cfProxySwitch: Switch
+    private lateinit var routeHealthValue: TextView
+    private lateinit var connectionLogValue: TextView
+    private lateinit var fakeTlsSwitch: SwitchCompat
+    private lateinit var cfProxySwitch: SwitchCompat
     private lateinit var proxyRow: View
     private lateinit var securityRow: View
     private lateinit var routeRow: View
@@ -78,6 +84,8 @@ class MainActivity : AppCompatActivity() {
         networkValue = findViewById(R.id.networkValue)
         linkModeValue = findViewById(R.id.linkModeValue)
         footerBody = findViewById(R.id.footerBody)
+        routeHealthValue = findViewById(R.id.routeHealthValue)
+        connectionLogValue = findViewById(R.id.connectionLogValue)
         fakeTlsSwitch = findViewById(R.id.fakeTlsSwitch)
         cfProxySwitch = findViewById(R.id.cfProxySwitch)
         proxyRow = findViewById(R.id.proxyRow)
@@ -146,6 +154,16 @@ class MainActivity : AppCompatActivity() {
         profileRow.setOnClickListener {
             Toast.makeText(this, ProxyRuntime.snapshot(this).routeStatus, Toast.LENGTH_SHORT).show()
         }
+
+        connectionLogValue.setOnLongClickListener {
+            val log = ConnectionLog.fullText()
+            if (log.isNotBlank()) {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("TG for Work log", log))
+                Toast.makeText(this, R.string.log_copied, Toast.LENGTH_SHORT).show()
+            }
+            true
+        }
     }
 
     private fun startProxy(openTelegram: Boolean) {
@@ -204,6 +222,12 @@ class MainActivity : AppCompatActivity() {
             if (stats.cfProxyEnabled) {
                 append("\nCloudflare включён")
             }
+        }
+        routeHealthValue.text = getString(R.string.route_health_prefix, stats.routeHealth)
+        connectionLogValue.text = if (stats.recentEvents.isEmpty()) {
+            getString(R.string.log_empty)
+        } else {
+            stats.recentEvents.joinToString("\n")
         }
     }
 

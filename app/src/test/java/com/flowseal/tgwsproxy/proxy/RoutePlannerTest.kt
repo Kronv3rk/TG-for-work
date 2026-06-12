@@ -84,4 +84,55 @@ class RoutePlannerTest {
         val methods = planner.methodsFor(2, false, options(cf = false))
         assertEquals(RouteMethod.WEBSOCKET, methods.first())
     }
+
+    @Test
+    fun stableRouteIsPromotedAboveBaseOrder() {
+        val planner = RoutePlanner()
+        // Base order on plain Wi-Fi with CF priority: WS first. Make CF measurably
+        // better: repeated fast successes, while WS keeps failing.
+        repeat(3) { planner.markConnected(RouteMethod.CLOUDFLARE, 2, false, 300) }
+        repeat(3) {
+            planner.markFailed(RouteMethod.WEBSOCKET, 2, false)
+            planner.markConnected(RouteMethod.WEBSOCKET, 2, false, 5_000)
+        }
+        val methods = planner.methodsFor(2, false, options(cf = true, cfPriority = true))
+        assertEquals(RouteMethod.CLOUDFLARE, methods.first())
+    }
+
+    @Test
+    fun unprovenRoutesKeepBaseOrder() {
+        val planner = RoutePlanner()
+        val methods = planner.methodsFor(2, true, options(cf = true, cfPriority = true))
+        assertEquals(
+            listOf(RouteMethod.CLOUDFLARE, RouteMethod.WEBSOCKET, RouteMethod.TCP),
+            methods
+        )
+    }
+
+    @Test
+    fun equallyReliableRoutesOrderedByLatency() {
+        val planner = RoutePlanner()
+        repeat(3) { planner.markConnected(RouteMethod.WEBSOCKET, 2, false, 6_000) }
+        repeat(3) { planner.markConnected(RouteMethod.TCP, 2, false, 200) }
+        val methods = planner.methodsFor(2, false, options(cf = false))
+        assertEquals(RouteMethod.TCP, methods.first())
+    }
+
+    @Test
+    fun healthSummaryShowsDashForUnprovenRoutes() {
+        val planner = RoutePlanner()
+        val summary = planner.healthSummary()
+        assertTrue(summary.contains("WS —"))
+        assertTrue(summary.contains("CF —"))
+        assertTrue(summary.contains("TCP —"))
+    }
+
+    @Test
+    fun healthSummaryShowsPercentAfterMeasurements() {
+        val planner = RoutePlanner()
+        repeat(5) { planner.markConnected(RouteMethod.WEBSOCKET, 2, false, 400) }
+        val summary = planner.healthSummary()
+        assertTrue("expected WS percentage in: $summary", Regex("WS \\d+%").containsMatchIn(summary))
+        assertTrue(summary.contains("CF —"))
+    }
 }
