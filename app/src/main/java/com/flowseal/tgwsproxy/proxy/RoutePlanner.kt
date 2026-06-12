@@ -15,6 +15,7 @@ enum class RouteMethod(
 
 class RoutePlanner {
     private val cooldownUntil = ConcurrentHashMap<RouteKey, Long>()
+    private val lastFailureAt = ConcurrentHashMap<RouteKey, Long>()
     private val lastStatus = AtomicReference("Маршрут ещё не выбран")
 
     fun methodsFor(dcId: Int, isMedia: Boolean, options: ProxyOptions): List<RouteMethod> {
@@ -28,6 +29,20 @@ class RoutePlanner {
         }
 
         return available.ifEmpty { base }
+    }
+
+    /**
+     * Adaptive connect budget. A route that has not failed recently gets the full
+     * timeout; a route that failed within [PROBATION_WINDOW_MS] is put on probation
+     * and only gets a short timeout, so a flaky path is abandoned quickly and the
+     * next route (which often carries the stuck media) is reached without a long wait.
+     *
+     * This mirrors the adaptive 2s/10s timeout used by the upstream tg-ws-proxy.
+     */
+    fun connectTimeoutMs(method: RouteMethod, dcId: Int, isMedia: Boolean): Int {
+        val failedAt = lastFailureAt[RouteKey(method, dcId, isMedia)] ?: return NORMAL_CONNECT_MS
+        val sinceFailure = System.currentTimeMillis() - failedAt
+        return if (sinceFailure in 0 until PROBATION_WINDOW_MS) PROBATION_CONNECT_MS else NORMAL_CONNECT_MS
     }
 
     fun policyLabel(options: ProxyOptions): String {
@@ -46,13 +61,17 @@ class RoutePlanner {
     }
 
     fun markConnected(method: RouteMethod, dcId: Int, isMedia: Boolean) {
-        cooldownUntil.remove(RouteKey(method, dcId, isMedia))
+        val key = RouteKey(method, dcId, isMedia)
+        cooldownUntil.remove(key)
+        lastFailureAt.remove(key)
         lastStatus.set("${method.label} активен: ${targetLabel(dcId, isMedia)}")
     }
 
     fun markFailed(method: RouteMethod, dcId: Int, isMedia: Boolean) {
-        cooldownUntil[RouteKey(method, dcId, isMedia)] =
-            System.currentTimeMillis() + method.cooldownMs
+        val now = System.currentTimeMillis()
+        val key = RouteKey(method, dcId, isMedia)
+        cooldownUntil[key] = now + method.cooldownMs
+        lastFailureAt[key] = now
         lastStatus.set("${method.label} не ответил, пробуем следующий маршрут")
     }
 
@@ -89,6 +108,11 @@ class RoutePlanner {
                 cooldownUntil.remove(entry.key, entry.value)
             }
         }
+        for (entry in lastFailureAt.entries) {
+            if (now - entry.value > PROBATION_WINDOW_MS) {
+                lastFailureAt.remove(entry.key, entry.value)
+            }
+        }
     }
 
     private fun targetLabel(dcId: Int, isMedia: Boolean): String {
@@ -100,4 +124,10 @@ class RoutePlanner {
         val dcId: Int,
         val isMedia: Boolean
     )
+
+    private companion object {
+        const val NORMAL_CONNECT_MS = 8_000
+        const val PROBATION_CONNECT_MS = 3_000
+        const val PROBATION_WINDOW_MS = 120_000L
+    }
 }

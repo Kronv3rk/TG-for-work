@@ -9,10 +9,22 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import com.flowseal.tgwsproxy.proxy.ProxyRuntime
 
 class ProxyService : Service() {
+    private val handler = Handler(Looper.getMainLooper())
+    private val refreshNotification = object : Runnable {
+        override fun run() {
+            if (!ProxyRuntime.isRunning()) return
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.notify(NOTIFICATION_ID, buildNotification())
+            handler.postDelayed(this, NOTIFICATION_REFRESH_MS)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -49,6 +61,7 @@ class ProxyService : Service() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(refreshNotification)
         ProxyRuntime.stop()
         super.onDestroy()
     }
@@ -62,9 +75,12 @@ class ProxyService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        handler.removeCallbacks(refreshNotification)
+        handler.postDelayed(refreshNotification, NOTIFICATION_REFRESH_MS)
     }
 
     private fun stopForegroundCompat() {
+        handler.removeCallbacks(refreshNotification)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -132,6 +148,7 @@ class ProxyService : Service() {
     companion object {
         private const val CHANNEL_ID = "tg_for_work_proxy"
         private const val NOTIFICATION_ID = 1001
+        private const val NOTIFICATION_REFRESH_MS = 3_000L
         const val ACTION_START = "com.flowseal.tgwsproxy.action.START"
         const val ACTION_OPEN_TELEGRAM = "com.flowseal.tgwsproxy.action.OPEN_TELEGRAM"
         const val ACTION_COPY_LINK = "com.flowseal.tgwsproxy.action.COPY_LINK"

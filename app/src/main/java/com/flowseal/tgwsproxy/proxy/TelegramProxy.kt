@@ -81,7 +81,9 @@ class TelegramProxy(
         server.reuseAddress = true
         serverSocket = server
         lastMessage = "Прокси слушает ${options.host}:${options.port}"
-        executor.execute {
+        // Run accept on a dedicated thread so client handlers and their download
+        // workers (which share the bounded executor) can never starve the listener.
+        Thread({
             while (!server.isClosed) {
                 try {
                     val socket = server.accept()
@@ -107,7 +109,7 @@ class TelegramProxy(
                     }
                 }
             }
-        }
+        }, "tg-proxy-accept").apply { isDaemon = true }.start()
     }
 
     fun snapshot(): ProxyStats = ProxyStats(
@@ -242,9 +244,10 @@ class TelegramProxy(
         splitter: MtprotoPacketSplitter?
     ): Boolean {
         val targetIp = dcRedirects[dcId] ?: return false
+        val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WEBSOCKET, dcId, isMedia)
         for (domain in wsDomains(dcId, isMedia)) {
             val ws = try {
-                RawWebSocket.connect(targetIp, domain)
+                RawWebSocket.connect(targetIp, domain, connectTimeout)
             } catch (redirect: WebSocketHandshakeException) {
                 if (!redirect.isRedirect) {
                     lastMessage = "WebSocket DC$dcId недоступен: ${redirect.statusLine}"
@@ -258,7 +261,10 @@ class TelegramProxy(
             routePlanner.markConnected(RouteMethod.WEBSOCKET, dcId, isMedia)
             lastMessage = routePlanner.status()
             ws.sendBinary(relayInit)
-            bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter)
+            val received = bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter)
+            // The relay accepted us but never sent a byte: most likely a bad worker.
+            // Cool it down so the next reconnect (Telegram retries fast) avoids it.
+            if (received == 0L) routePlanner.markFailed(RouteMethod.WEBSOCKET, dcId, isMedia)
             return true
         }
         return false
@@ -274,10 +280,14 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ): Boolean {
-        for (baseDomain in cfBalancer.getDomainsForDc(dcId)) {
+        val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.CLOUDFLARE, dcId, isMedia)
+        // Cap the number of domains tried per connection. Without a cap a fully
+        // blocked Cloudflare pool could burn through every domain before falling
+        // back, which is exactly when media stalls for tens of seconds.
+        for (baseDomain in cfBalancer.getDomainsForDc(dcId).take(MAX_CF_ATTEMPTS)) {
             val domain = "kws$dcId.$baseDomain"
             val ws = try {
-                RawWebSocket.connect(domain, domain)
+                RawWebSocket.connect(domain, domain, connectTimeout)
             } catch (ignored: Exception) {
                 null
             } ?: continue
@@ -287,7 +297,8 @@ class TelegramProxy(
             routePlanner.markConnected(RouteMethod.CLOUDFLARE, dcId, isMedia)
             lastMessage = routePlanner.status()
             ws.sendBinary(relayInit)
-            bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter)
+            val received = bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter)
+            if (received == 0L) routePlanner.markFailed(RouteMethod.CLOUDFLARE, dcId, isMedia)
             return true
         }
         return false
@@ -311,7 +322,8 @@ class TelegramProxy(
             remote.keepAlive = true
             remote.receiveBufferSize = BUFFER_SIZE
             remote.sendBufferSize = BUFFER_SIZE
-            remote.connect(java.net.InetSocketAddress(targetIp, 443), 10_000)
+            val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.TCP, dcId, isMedia)
+            remote.connect(java.net.InetSocketAddress(targetIp, 443), connectTimeout)
             val remoteIn = BufferedInputStream(remote.getInputStream())
             val remoteOut = BufferedOutputStream(remote.getOutputStream())
             remoteOut.write(relayInit)
@@ -324,6 +336,7 @@ class TelegramProxy(
         return true
     }
 
+    /** Bridges the client and a WebSocket relay; returns the bytes received from the relay. */
     private fun bridgeClientAndWebSocket(
         client: Socket,
         clientIn: InputStream,
@@ -331,13 +344,15 @@ class TelegramProxy(
         ws: RawWebSocket,
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
-    ) {
+    ): Long {
         val done = AtomicInteger(0)
+        val sessionDown = AtomicLong(0)
         val down = try {
             executor.submit {
                 try {
                     while (done.get() == 0) {
                         val data = ws.receive() ?: break
+                        sessionDown.addAndGet(data.size.toLong())
                         bytesDown.addAndGet(data.size.toLong())
                         val plain = crypto.telegramDecrypt.update(data)
                         val encrypted = crypto.clientEncrypt.update(plain)
@@ -380,6 +395,7 @@ class TelegramProxy(
         } finally {
             runCatching { down.cancel(true) }
         }
+        return sessionDown.get()
     }
 
     private fun bridgeClientAndTcp(
@@ -673,6 +689,7 @@ class TelegramProxy(
             4 to "149.154.167.220"
         )
         private const val MAX_PROXY_THREADS = 96
+        private const val MAX_CF_ATTEMPTS = 3
         private val defaultDcIps = mapOf(
             1 to "149.154.175.50",
             2 to "149.154.167.51",
