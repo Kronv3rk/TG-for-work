@@ -86,25 +86,40 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [[ -n "$ANDROID_KEYSTORE_BASE64" \
-            && -n "$ANDROID_KEYSTORE_PASSWORD" \
-            && -n "$ANDROID_KEY_ALIAS" \
-            && -n "$ANDROID_KEY_PASSWORD" ]]; then
-            mkdir -p "$RUNNER_TEMP/signing"
-            KEYSTORE_FILE="$RUNNER_TEMP/signing/release.jks"
+          mkdir -p "$RUNNER_TEMP/signing"
+          KEYSTORE_FILE="$RUNNER_TEMP/signing/release.jks"
+
+          # Count how many of the four signing secrets are present so a partial
+          # setup fails loudly instead of silently signing with the fallback key.
+          SECRET_COUNT=0
+          for value in "$ANDROID_KEYSTORE_BASE64" "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD"; do
+            [[ -n "$value" ]] && SECRET_COUNT=$((SECRET_COUNT + 1))
+          done
+
+          if [[ "$SECRET_COUNT" -eq 4 ]]; then
+            echo "Signing with key from repository secrets."
             echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
-
-            {
-              echo "ANDROID_KEYSTORE_FILE=$KEYSTORE_FILE"
-              echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD"
-              echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS"
-              echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
-            } >> "$GITHUB_ENV"
-
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+            KEY_ALIAS="$ANDROID_KEY_ALIAS"
+            KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
+          elif [[ "$SECRET_COUNT" -ne 0 ]]; then
+            echo "Partial release signing secrets detected ($SECRET_COUNT/4 set)." >&2
+            echo "Set all of ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD, or none to use the committed key." >&2
+            exit 1
           else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Signing with committed fallback key (app/signing/release-keystore.b64)."
+            base64 --decode < app/signing/release-keystore.b64 > "$KEYSTORE_FILE"
+            STORE_PASSWORD="LeYIC8VM6c8hG7QUrItSRBYB3Pyu4gDf"
+            KEY_ALIAS="tgforwork"
+            KEY_PASSWORD="LeYIC8VM6c8hG7QUrItSRBYB3Pyu4gDf"
           fi
+
+          {
+            echo "ANDROID_KEYSTORE_FILE=$KEYSTORE_FILE"
+            echo "ANDROID_KEYSTORE_PASSWORD=$STORE_PASSWORD"
+            echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
 
       - name: Build APK
         id: build
@@ -113,18 +128,12 @@ jobs:
           TAG="${{ steps.meta.outputs.tag }}"
           chmod +x ./gradlew
 
-          if [[ "${{ steps.signing.outputs.enabled }}" == "true" ]]; then
-            ./gradlew :app:assembleRelease --no-daemon --stacktrace
-            APK_PATH="$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)"
-            APK_KIND="release-signed"
-          else
-            ./gradlew :app:assembleDebug --no-daemon --stacktrace
-            APK_PATH="$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)"
-            APK_KIND="debug"
-          fi
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          APK_PATH="$(find app/build/outputs/apk/release -name '*.apk' ! -name '*-unsigned.apk' | head -n 1)"
+          APK_KIND="release-signed"
 
           if [[ -z "$APK_PATH" || ! -f "$APK_PATH" ]]; then
-            echo "APK was not produced" >&2
+            echo "Signed APK was not produced" >&2
             exit 1
           fi
 
@@ -150,18 +159,9 @@ jobs:
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
           APK="${{ steps.build.outputs.asset_path }}"
-          APK_KIND="${{ steps.build.outputs.apk_kind }}"
           NOTES="$RUNNER_TEMP/release-notes.md"
 
-          if [[ "$APK_KIND" == "release-signed" ]]; then
-            echo "Signed Android release APK built by GitHub Actions." > "$NOTES"
-          else
-            {
-              echo "Debug-signed Android APK built by GitHub Actions."
-              echo
-              echo "Configure Android signing secrets to publish signed release APKs."
-            } > "$NOTES"
-          fi
+          echo "Signed Android release APK built by GitHub Actions." > "$NOTES"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$APK" --clobber
