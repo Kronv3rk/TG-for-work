@@ -88,15 +88,24 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/signing"
           KEYSTORE_FILE="$RUNNER_TEMP/signing/release.jks"
-          if [[ -n "$ANDROID_KEYSTORE_BASE64" \
-            && -n "$ANDROID_KEYSTORE_PASSWORD" \
-            && -n "$ANDROID_KEY_ALIAS" \
-            && -n "$ANDROID_KEY_PASSWORD" ]]; then
+
+          # Count how many of the four signing secrets are present so a partial
+          # setup fails loudly instead of silently signing with the fallback key.
+          SECRET_COUNT=0
+          for value in "$ANDROID_KEYSTORE_BASE64" "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD"; do
+            [[ -n "$value" ]] && SECRET_COUNT=$((SECRET_COUNT + 1))
+          done
+
+          if [[ "$SECRET_COUNT" -eq 4 ]]; then
             echo "Signing with key from repository secrets."
             echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
             STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
             KEY_ALIAS="$ANDROID_KEY_ALIAS"
             KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
+          elif [[ "$SECRET_COUNT" -ne 0 ]]; then
+            echo "Partial release signing secrets detected ($SECRET_COUNT/4 set)." >&2
+            echo "Set all of ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD, or none to use the committed key." >&2
+            exit 1
           else
             echo "Signing with committed fallback key (app/signing/release-keystore.b64)."
             base64 --decode < app/signing/release-keystore.b64 > "$KEYSTORE_FILE"
