@@ -1,0 +1,81 @@
+name: Баг
+description: Прокси не запускается, Telegram не подключается, рвутся чат или медиа
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Перед отправкой проверьте, что проблема воспроизводится на последней версии из
+        [Releases](../../releases).
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия приложения
+      description: Видна в заголовке главного экрана, например `1.7.1`.
+      placeholder: "1.7.1"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Устройство и версия Android
+      placeholder: "Pixel 6a, Android 14"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: network
+    attributes:
+      label: Тип сети
+      options:
+        - Wi-Fi
+        - Мобильная сеть
+        - И то, и другое
+        - Не знаю
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Что именно ломается
+      options:
+        - Прокси не стартует
+        - Telegram не подключается к прокси
+        - Чат работает, медиа не грузится
+        - Соединение рвётся во время работы
+        - Проблема с UI или уведомлением
+        - Другое
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги воспроизведения
+      placeholder: |
+        1. Запустил прокси
+        2. Нажал «Открыть Telegram»
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемое и фактическое поведение
+    validations:
+      required: true
+
+  - type: textarea
+    id: journal
+    attributes:
+      label: Журнал подключений
+      description: >
+        Долгое нажатие на журнал на главном экране копирует его целиком.
+        Либо приложите вывод `adb logcat -s TgForWork`.
+      render: text
+    validations:
+      required: false

@@ -1,0 +1,9 @@
+# Владелец по умолчанию для всего репозитория.
+*                       @Kronv3rk
+
+# Логика прокси и маршрутизации — самая чувствительная часть, ревью обязательно.
+/app/src/main/java/com/flowseal/tgwsproxy/proxy/   @Kronv3rk
+
+# Сборка, релизы и подпись.
+/.github/workflows/     @Kronv3rk
+/app/signing/           @Kronv3rk

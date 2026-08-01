@@ -1,0 +1,48 @@
+name: Улучшение
+description: Предложить новую возможность или изменение поведения
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую проблему решаем
+      description: Что сейчас неудобно или не работает так, как хотелось бы.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Предложение
+      description: Как это должно работать.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Область
+      options:
+        - Маршрутизация и обход блокировок
+        - Стабильность соединения и медиа
+        - UI и уведомления
+        - Сборка, CI, релизы
+        - Другое
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы
+      description: Что уже пробовали или какие ещё варианты рассматривали.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: upstream
+    attributes:
+      label: Связь с upstream
+      options:
+        - label: Это перенос изменения из `Flowseal/tg-ws-proxy`
+          required: false
