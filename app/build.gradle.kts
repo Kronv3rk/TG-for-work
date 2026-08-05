@@ -22,8 +22,8 @@ android {
         applicationId = "com.flowseal.tgwsproxy"
         minSdk = 24
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.7.1"
+        versionCode = 14
+        versionName = "1.7.2"
     }
 
     signingConfigs {
@@ -33,6 +33,12 @@ android {
                 storePassword = releaseKeystorePassword
                 keyAlias = releaseKeyAlias
                 keyPassword = releaseKeyPassword
+                // Sign with all schemes so sideloading works on stricter
+                // installers (e.g. MIUI) and older Android that still expect
+                // the v1/JAR signature alongside v2/v3.
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
