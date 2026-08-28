@@ -11,14 +11,18 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.widget.SwitchCompat
+import com.flowseal.tgwsproxy.proxy.CfProxyBalancer
 import com.flowseal.tgwsproxy.proxy.ConnectionLog
 import com.flowseal.tgwsproxy.proxy.ProxyRuntime
 import com.flowseal.tgwsproxy.proxy.ProxyStats
+import com.flowseal.tgwsproxy.proxy.TelegramProxy
 
 class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -98,30 +102,7 @@ class MainActivity : AppCompatActivity() {
         val options = ProxyRuntime.loadOptions(this)
         fakeTlsSwitch.isChecked = options.fakeTlsEnabled
         cfProxySwitch.isChecked = options.cfProxyEnabled
-
-        fakeTlsSwitch.setOnCheckedChangeListener { _, checked ->
-            val wasRunning = ProxyRuntime.isRunning()
-            ProxyRuntime.setFakeTlsEnabled(this, checked)
-            if (wasRunning) ProxyService.start(this)
-            Toast.makeText(
-                this,
-                if (checked) R.string.fake_tls_enabled else R.string.fake_tls_disabled,
-                Toast.LENGTH_SHORT
-            ).show()
-            renderState(ProxyRuntime.snapshot(this))
-        }
-
-        cfProxySwitch.setOnCheckedChangeListener { _, checked ->
-            val wasRunning = ProxyRuntime.isRunning()
-            ProxyRuntime.setCfProxyEnabled(this, checked)
-            if (wasRunning) ProxyService.start(this)
-            Toast.makeText(
-                this,
-                if (checked) R.string.cfproxy_enabled else R.string.cfproxy_disabled,
-                Toast.LENGTH_SHORT
-            ).show()
-            renderState(ProxyRuntime.snapshot(this))
-        }
+        attachSwitchListeners()
 
         connectButton.setOnClickListener {
             startProxy(openTelegram = true)
@@ -151,9 +132,7 @@ class MainActivity : AppCompatActivity() {
         proxyRow.setOnClickListener { copyProxyLink() }
         securityRow.setOnClickListener { fakeTlsSwitch.isChecked = !fakeTlsSwitch.isChecked }
         routeRow.setOnClickListener { cfProxySwitch.isChecked = !cfProxySwitch.isChecked }
-        profileRow.setOnClickListener {
-            Toast.makeText(this, ProxyRuntime.snapshot(this).routeStatus, Toast.LENGTH_SHORT).show()
-        }
+        profileRow.setOnClickListener { showSettingsDialog() }
 
         connectionLogValue.setOnLongClickListener {
             val log = ConnectionLog.fullText()
@@ -164,6 +143,97 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
+    }
+
+    /**
+     * (Re)attaches the Fake TLS and Cloudflare switch listeners. Kept separate so
+     * the switches can be resynced from saved options without firing a listener.
+     */
+    private fun attachSwitchListeners() {
+        fakeTlsSwitch.setOnCheckedChangeListener { _, checked ->
+            val wasRunning = ProxyRuntime.isRunning()
+            ProxyRuntime.setFakeTlsEnabled(this, checked)
+            if (wasRunning) ProxyService.start(this)
+            Toast.makeText(
+                this,
+                if (checked) R.string.fake_tls_enabled else R.string.fake_tls_disabled,
+                Toast.LENGTH_SHORT
+            ).show()
+            renderState(ProxyRuntime.snapshot(this))
+        }
+
+        cfProxySwitch.setOnCheckedChangeListener { _, checked ->
+            val wasRunning = ProxyRuntime.isRunning()
+            ProxyRuntime.setCfProxyEnabled(this, checked)
+            if (wasRunning) ProxyService.start(this)
+            Toast.makeText(
+                this,
+                if (checked) R.string.cfproxy_enabled else R.string.cfproxy_disabled,
+                Toast.LENGTH_SHORT
+            ).show()
+            renderState(ProxyRuntime.snapshot(this))
+        }
+    }
+
+    private fun showSettingsDialog() {
+        val options = ProxyRuntime.loadOptions(this)
+        val view = layoutInflater.inflate(R.layout.dialog_settings, null)
+        val workerInput = view.findViewById<EditText>(R.id.workerDomainInput)
+        val maskingInput = view.findViewById<EditText>(R.id.maskingDomainInput)
+        val secretInput = view.findViewById<EditText>(R.id.secretInput)
+        workerInput.setText(options.cfWorkerDomain)
+        maskingInput.setText(options.fakeTlsDomain)
+        secretInput.setText(options.secretHex)
+
+        view.findViewById<Button>(R.id.generateSecretButton).setOnClickListener {
+            secretInput.setText(TelegramProxy.generateSecret())
+        }
+        view.findViewById<Button>(R.id.copySecretButton).setOnClickListener {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("secret", secretInput.text.toString().trim()))
+            Toast.makeText(this, R.string.settings_secret_copied, Toast.LENGTH_SHORT).show()
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.settings_dialog_title)
+            .setView(view)
+            .setNegativeButton(R.string.settings_cancel, null)
+            .setPositiveButton(R.string.settings_save) { _, _ ->
+                val worker = workerInput.text.toString().trim()
+                val masking = maskingInput.text.toString().trim()
+                val secret = secretInput.text.toString().trim().lowercase()
+                if (secret.isNotEmpty() &&
+                    !(secret.length == 32 && secret.all { it.isDigit() || it in 'a'..'f' })
+                ) {
+                    Toast.makeText(this, R.string.settings_invalid_secret, Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                val workerDomains = worker.split(Regex("[,\\s]+")).filter { it.isNotEmpty() }
+                if (workerDomains.any { CfProxyBalancer.normalizeDomain(it) == null }) {
+                    Toast.makeText(this, R.string.settings_invalid_worker, Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                if (masking.isNotEmpty() && CfProxyBalancer.normalizeDomain(masking) == null) {
+                    Toast.makeText(this, R.string.settings_invalid_masking, Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                ProxyRuntime.saveSettings(
+                    this,
+                    worker,
+                    masking,
+                    if (secret.isEmpty()) options.secretHex else secret
+                )
+                // Saving a custom masking domain can flip Fake TLS on or off, so
+                // resync the switch from the saved options without firing its
+                // listener — otherwise a later toggle would overwrite the domain.
+                fakeTlsSwitch.setOnCheckedChangeListener(null)
+                fakeTlsSwitch.isChecked = ProxyRuntime.loadOptions(this).fakeTlsEnabled
+                attachSwitchListeners()
+                if (ProxyRuntime.isRunning()) ProxyService.start(this)
+                renderState(ProxyRuntime.snapshot(this))
+                Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
+            }
+            .show()
     }
 
     private fun startProxy(openTelegram: Boolean) {
@@ -210,6 +280,8 @@ class MainActivity : AppCompatActivity() {
             append("\n")
             append("Маршруты: WS ")
             append(stats.wsConnections)
+            append(" / CFW ")
+            append(stats.workerConnections)
             append(" / CF ")
             append(stats.cfProxyConnections)
             append(" / TCP ")

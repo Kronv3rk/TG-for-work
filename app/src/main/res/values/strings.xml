@@ -33,8 +33,8 @@
     <string name="security_body">Включить или выключить Fake TLS.</string>
     <string name="route_title">Автомаршрут</string>
     <string name="route_body">Переключить Cloudflare для мобильной сети и медиа.</string>
-    <string name="profile_title">Диагностика</string>
-    <string name="profile_body">Показать активный маршрут и ошибки.</string>
+    <string name="profile_title">Настройки</string>
+    <string name="profile_body">Свой Cloudflare Worker, маскирующий домен и секрет.</string>
     <string name="route_panel_title">Маршрутизация</string>
     <string name="route_status_empty">Маршрут ещё не выбран</string>
     <string name="route_policy_empty">Авто: WS > TCP</string>
@@ -69,4 +69,19 @@
     <string name="cfproxy_enabled">Cloudflare включён</string>
     <string name="cfproxy_disabled">Cloudflare выключен</string>
     <string name="proxy_restarted">Прокси перезапущен</string>
+    <string name="settings_dialog_title">Настройки прокси</string>
+    <string name="settings_worker_label">Свой Cloudflare Worker</string>
+    <string name="settings_worker_hint">например xxxx.workers.dev, можно несколько через запятую</string>
+    <string name="settings_masking_label">Маскирующий домен (Fake TLS)</string>
+    <string name="settings_masking_hint">www.google.com</string>
+    <string name="settings_secret_label">Секрет (32 hex-символа)</string>
+    <string name="settings_generate">Сгенерировать</string>
+    <string name="settings_copy_secret">Скопировать</string>
+    <string name="settings_save">Сохранить</string>
+    <string name="settings_cancel">Отмена</string>
+    <string name="settings_saved">Настройки сохранены</string>
+    <string name="settings_secret_copied">Секрет скопирован</string>
+    <string name="settings_invalid_secret">Секрет должен быть ровно 32 hex-символа</string>
+    <string name="settings_invalid_worker">Некорректный домен Worker</string>
+    <string name="settings_invalid_masking">Некорректный маскирующий домен</string>
 </resources>
