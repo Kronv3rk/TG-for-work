@@ -38,6 +38,7 @@ class TelegramProxy(
     private val wsConnections = AtomicInteger(0)
     private val tcpFallbackConnections = AtomicInteger(0)
     private val cfProxyConnections = AtomicInteger(0)
+    private val workerConnections = AtomicInteger(0)
     private val badConnections = AtomicInteger(0)
     private val maskedConnections = AtomicInteger(0)
     private val bytesUp = AtomicLong(0)
@@ -119,6 +120,7 @@ class TelegramProxy(
         wsConnections = wsConnections.get(),
         tcpFallbackConnections = tcpFallbackConnections.get(),
         cfProxyConnections = cfProxyConnections.get(),
+        workerConnections = workerConnections.get(),
         badConnections = badConnections.get(),
         maskedConnections = maskedConnections.get(),
         bytesUp = bytesUp.get(),
@@ -201,6 +203,15 @@ class TelegramProxy(
 
             val handled = runCatching {
                 when (method) {
+                    RouteMethod.WORKER -> bridgeCfWorker(
+                        client,
+                        dcId,
+                        isMedia,
+                        clientIn,
+                        clientOut,
+                        relayInit,
+                        crypto
+                    )
                     RouteMethod.WEBSOCKET -> bridgeWebSocket(
                         client,
                         dcId,
@@ -328,6 +339,58 @@ class TelegramProxy(
             } else {
                 ConnectionLog.sessionEnd(
                     RouteMethod.CLOUDFLARE,
+                    dcId,
+                    isMedia,
+                    System.currentTimeMillis() - sessionStart,
+                    received
+                )
+            }
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Relays through the user's own Cloudflare Worker. The worker is a raw
+     * TCP-over-WebSocket tunnel to `dst:443` (`/apiws?dst=<dc-ip>&dc=<n>`), so the
+     * obfuscated MTProto stream is sent continuously, exactly like the direct-TCP
+     * fallback (no packet splitter) — but fronted by Cloudflare, which is far
+     * harder to block. This mirrors upstream tg-ws-proxy's `_cfproxy_worker_fallback`.
+     */
+    private fun bridgeCfWorker(
+        client: Socket,
+        dcId: Int,
+        isMedia: Boolean,
+        clientIn: InputStream,
+        clientOut: OutputStream,
+        relayInit: ByteArray,
+        crypto: CryptoContext
+    ): Boolean {
+        val dst = defaultDcIps[dcId] ?: return false
+        val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WORKER, dcId, isMedia)
+        for (workerDomain in options.cfWorkerDomains.take(MAX_CF_ATTEMPTS)) {
+            val path = "/apiws?dst=$dst&dc=$dcId"
+            val connectStart = System.currentTimeMillis()
+            val ws = try {
+                RawWebSocket.connect(workerDomain, workerDomain, connectTimeout, path)
+            } catch (ignored: Exception) {
+                null
+            } ?: continue
+
+            val connectMs = System.currentTimeMillis() - connectStart
+            workerConnections.incrementAndGet()
+            routePlanner.markConnected(RouteMethod.WORKER, dcId, isMedia, connectMs)
+            ConnectionLog.connected(RouteMethod.WORKER, dcId, isMedia, connectMs, workerDomain)
+            lastMessage = routePlanner.status()
+            ws.sendBinary(relayInit)
+            val sessionStart = System.currentTimeMillis()
+            val received = bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter = null)
+            if (received == 0L) {
+                routePlanner.markFailed(RouteMethod.WORKER, dcId, isMedia)
+                ConnectionLog.noData(RouteMethod.WORKER, dcId, isMedia)
+            } else {
+                ConnectionLog.sessionEnd(
+                    RouteMethod.WORKER,
                     dcId,
                     isMedia,
                     System.currentTimeMillis() - sessionStart,

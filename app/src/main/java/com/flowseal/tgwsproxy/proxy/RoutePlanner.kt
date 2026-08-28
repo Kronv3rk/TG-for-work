@@ -8,6 +8,7 @@ enum class RouteMethod(
     val title: String,
     val cooldownMs: Long
 ) {
+    WORKER("CFW", "CF Worker", 30_000L),
     WEBSOCKET("WS", "WebSocket", 45_000L),
     CLOUDFLARE("CF", "Cloudflare", 30_000L),
     TCP("TCP", "TCP", 45_000L)
@@ -54,12 +55,13 @@ class RoutePlanner {
     }
 
     fun policyLabel(options: ProxyOptions): String {
-        return when {
+        val core = when {
             options.cellularNetwork && options.cfProxyEnabled -> "Авто: мобильная сеть, CF > WS > TCP"
             options.cellularNetwork -> "Авто: мобильная сеть, WS > TCP"
             options.cfProxyEnabled -> "Авто: WS, CF для медиа, TCP запасной"
             else -> "Авто: WS > TCP"
         }
+        return if (options.cfWorkerEnabled) "Свой CF Worker → $core" else core
     }
 
     fun status(): String = lastStatus.get()
@@ -108,7 +110,7 @@ class RoutePlanner {
     }
 
     private fun baseOrder(isMedia: Boolean, options: ProxyOptions): List<RouteMethod> {
-        return when {
+        val core = when {
             options.cellularNetwork && options.cfProxyEnabled -> listOf(
                 RouteMethod.CLOUDFLARE,
                 RouteMethod.WEBSOCKET,
@@ -132,6 +134,10 @@ class RoutePlanner {
             )
             else -> listOf(RouteMethod.WEBSOCKET, RouteMethod.TCP)
         }
+        // The user's own Cloudflare Worker is a private, blocking-resistant relay,
+        // so try it first when configured; health ranking may reorder later if it
+        // proves slower or starts failing.
+        return if (options.cfWorkerEnabled) listOf(RouteMethod.WORKER) + core else core
     }
 
     private fun clearExpiredCooldowns(now: Long) {

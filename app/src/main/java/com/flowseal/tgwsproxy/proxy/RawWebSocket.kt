@@ -175,7 +175,12 @@ class RawWebSocket private constructor(
         private val EMPTY_PAYLOAD = ByteArray(0)
         private val random = SecureRandom()
 
-        fun connect(targetIp: String, domain: String, timeoutMs: Int = 10_000): RawWebSocket {
+        fun connect(
+            targetIp: String,
+            domain: String,
+            timeoutMs: Int = 10_000,
+            path: String = "/apiws"
+        ): RawWebSocket {
             val plain = Socket()
             var ssl: SSLSocket? = null
             try {
@@ -200,7 +205,7 @@ class RawWebSocket private constructor(
                 val keyBytes = ByteArray(16).also(random::nextBytes)
                 val wsKey = Base64.encodeToString(keyBytes, Base64.NO_WRAP)
                 val request = buildString {
-                    append("GET /apiws HTTP/1.1\r\n")
+                    append("GET ").append(path).append(" HTTP/1.1\r\n")
                     append("Host: ").append(domain).append("\r\n")
                     append("Upgrade: websocket\r\n")
                     append("Connection: Upgrade\r\n")

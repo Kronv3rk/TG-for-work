@@ -9,11 +9,13 @@ class RoutePlannerTest {
     private fun options(
         cf: Boolean = true,
         cfPriority: Boolean = true,
-        cellular: Boolean = false
+        cellular: Boolean = false,
+        worker: String = ""
     ) = ProxyOptions(
         secretHex = "00112233445566778899aabbccddeeff",
         cfProxyEnabled = cf,
         cfProxyPriority = cfPriority,
+        cfWorkerDomain = worker,
         cellularNetwork = cellular
     )
 
@@ -134,5 +136,19 @@ class RoutePlannerTest {
         val summary = planner.healthSummary()
         assertTrue("expected WS percentage in: $summary", Regex("WS \\d+%").containsMatchIn(summary))
         assertTrue(summary.contains("CF —"))
+    }
+
+    @Test
+    fun workerTriedFirstWhenConfigured() {
+        val planner = RoutePlanner()
+        val methods = planner.methodsFor(2, false, options(worker = "my.worker.dev"))
+        assertEquals(RouteMethod.WORKER, methods.first())
+    }
+
+    @Test
+    fun workerAbsentWhenNotConfigured() {
+        val planner = RoutePlanner()
+        val methods = planner.methodsFor(2, false, options())
+        assertFalse(methods.contains(RouteMethod.WORKER))
     }
 }

@@ -19,6 +19,7 @@ object ProxyRuntime {
     private const val KEY_CF_ENABLED = "cf_enabled"
     private const val KEY_CF_PRIORITY = "cf_priority"
     private const val KEY_CF_USER_DOMAIN = "cf_user_domain"
+    private const val KEY_CF_WORKER_DOMAIN = "cf_worker_domain"
 
     @Volatile
     private var proxy: TelegramProxy? = null
@@ -95,6 +96,25 @@ object ProxyRuntime {
         if (isRunning()) restart(context)
     }
 
+    /**
+     * Persists user-editable settings — own Cloudflare Worker domain, Fake-TLS
+     * masking domain and secret — in one shot, then restarts the proxy if running
+     * so the new values take effect. A secret that is not 32 hex chars is ignored
+     * (the existing one is kept); callers should validate before saving.
+     */
+    fun saveSettings(context: Context, workerDomain: String, maskingDomain: String, secretHex: String) {
+        val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CF_WORKER_DOMAIN, workerDomain.trim())
+            .putString(KEY_FAKE_TLS_DOMAIN, maskingDomain.trim())
+        val cleanSecret = secretHex.trim().lowercase()
+        if (cleanSecret.length == 32 && cleanSecret.all { it.isDigit() || it in 'a'..'f' }) {
+            editor.putString(KEY_SECRET, cleanSecret)
+        }
+        editor.apply()
+        if (isRunning()) restart(context)
+    }
+
     fun copyLink(context: Context) {
         val link = currentLink(context)
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -125,6 +145,7 @@ object ProxyRuntime {
             cfProxyEnabled = prefs.getBoolean(KEY_CF_ENABLED, true),
             cfProxyPriority = prefs.getBoolean(KEY_CF_PRIORITY, true),
             cfProxyUserDomain = prefs.getString(KEY_CF_USER_DOMAIN, "").orEmpty(),
+            cfWorkerDomain = prefs.getString(KEY_CF_WORKER_DOMAIN, "").orEmpty(),
             fakeTlsDomain = prefs.getString(KEY_FAKE_TLS_DOMAIN, ProxyOptions.DEFAULT_FAKE_TLS_DOMAIN)
                 .orEmpty(),
             cellularNetwork = isCellularNetwork(context)

@@ -25,4 +25,21 @@ class ProxyOptionsTest {
     fun differentSecretsAreNotEqual() {
         assertFalse(ProxyOptions(secretHex = "abc") == ProxyOptions(secretHex = "def"))
     }
+
+    @Test
+    fun cfWorkerDomainsParsedFromMixedSeparators() {
+        val options = ProxyOptions(
+            secretHex = "abc",
+            cfWorkerDomain = "a.workers.dev, b.workers.dev c.workers.dev"
+        )
+        assertEquals(listOf("a.workers.dev", "b.workers.dev", "c.workers.dev"), options.cfWorkerDomains)
+        assertTrue(options.cfWorkerEnabled)
+    }
+
+    @Test
+    fun cfWorkerDisabledWhenBlank() {
+        val options = ProxyOptions(secretHex = "abc", cfWorkerDomain = "   ")
+        assertTrue(options.cfWorkerDomains.isEmpty())
+        assertFalse(options.cfWorkerEnabled)
+    }
 }
