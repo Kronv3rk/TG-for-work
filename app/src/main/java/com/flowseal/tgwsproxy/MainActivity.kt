@@ -102,30 +102,7 @@ class MainActivity : AppCompatActivity() {
         val options = ProxyRuntime.loadOptions(this)
         fakeTlsSwitch.isChecked = options.fakeTlsEnabled
         cfProxySwitch.isChecked = options.cfProxyEnabled
-
-        fakeTlsSwitch.setOnCheckedChangeListener { _, checked ->
-            val wasRunning = ProxyRuntime.isRunning()
-            ProxyRuntime.setFakeTlsEnabled(this, checked)
-            if (wasRunning) ProxyService.start(this)
-            Toast.makeText(
-                this,
-                if (checked) R.string.fake_tls_enabled else R.string.fake_tls_disabled,
-                Toast.LENGTH_SHORT
-            ).show()
-            renderState(ProxyRuntime.snapshot(this))
-        }
-
-        cfProxySwitch.setOnCheckedChangeListener { _, checked ->
-            val wasRunning = ProxyRuntime.isRunning()
-            ProxyRuntime.setCfProxyEnabled(this, checked)
-            if (wasRunning) ProxyService.start(this)
-            Toast.makeText(
-                this,
-                if (checked) R.string.cfproxy_enabled else R.string.cfproxy_disabled,
-                Toast.LENGTH_SHORT
-            ).show()
-            renderState(ProxyRuntime.snapshot(this))
-        }
+        attachSwitchListeners()
 
         connectButton.setOnClickListener {
             startProxy(openTelegram = true)
@@ -165,6 +142,36 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.log_copied, Toast.LENGTH_SHORT).show()
             }
             true
+        }
+    }
+
+    /**
+     * (Re)attaches the Fake TLS and Cloudflare switch listeners. Kept separate so
+     * the switches can be resynced from saved options without firing a listener.
+     */
+    private fun attachSwitchListeners() {
+        fakeTlsSwitch.setOnCheckedChangeListener { _, checked ->
+            val wasRunning = ProxyRuntime.isRunning()
+            ProxyRuntime.setFakeTlsEnabled(this, checked)
+            if (wasRunning) ProxyService.start(this)
+            Toast.makeText(
+                this,
+                if (checked) R.string.fake_tls_enabled else R.string.fake_tls_disabled,
+                Toast.LENGTH_SHORT
+            ).show()
+            renderState(ProxyRuntime.snapshot(this))
+        }
+
+        cfProxySwitch.setOnCheckedChangeListener { _, checked ->
+            val wasRunning = ProxyRuntime.isRunning()
+            ProxyRuntime.setCfProxyEnabled(this, checked)
+            if (wasRunning) ProxyService.start(this)
+            Toast.makeText(
+                this,
+                if (checked) R.string.cfproxy_enabled else R.string.cfproxy_disabled,
+                Toast.LENGTH_SHORT
+            ).show()
+            renderState(ProxyRuntime.snapshot(this))
         }
     }
 
@@ -216,6 +223,12 @@ class MainActivity : AppCompatActivity() {
                     masking,
                     if (secret.isEmpty()) options.secretHex else secret
                 )
+                // Saving a custom masking domain can flip Fake TLS on or off, so
+                // resync the switch from the saved options without firing its
+                // listener — otherwise a later toggle would overwrite the domain.
+                fakeTlsSwitch.setOnCheckedChangeListener(null)
+                fakeTlsSwitch.isChecked = ProxyRuntime.loadOptions(this).fakeTlsEnabled
+                attachSwitchListeners()
                 if (ProxyRuntime.isRunning()) ProxyService.start(this)
                 renderState(ProxyRuntime.snapshot(this))
                 Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
