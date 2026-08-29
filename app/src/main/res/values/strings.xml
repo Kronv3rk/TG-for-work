@@ -100,6 +100,10 @@
     <string name="settings_invalid_port">Порт должен быть числом от 1 до 65535</string>
     <string name="settings_invalid_dcip">Некорректная пара DC:IP</string>
     <string name="settings_restart_hint">Настройки применены, прокси перезапущен</string>
+    <string name="link_changed_title">Ссылка прокси изменилась</string>
+    <string name="link_changed_body">Telegram хранит прежние настройки прокси, и они больше не подходят — из-за этого появляется сообщение «прокси использует некорректные настройки». Откройте Telegram с новой ссылкой, чтобы подключить прокси заново.</string>
+    <string name="link_changed_open">Открыть Telegram</string>
+    <string name="link_changed_later">Позже</string>
     <string name="build_info_placeholder">TG for Work</string>
     <string name="background_warning">Android может усыплять прокси. Нажмите, чтобы разрешить фоновую работу без ограничений.</string>
     <string name="background_ok">Фоновая работа разрешена</string>

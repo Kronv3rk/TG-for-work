@@ -347,6 +347,13 @@ class MainActivity : AppCompatActivity() {
                         ?: ProxyOptions.DEFAULT_MAX_CONNECTIONS,
                     fakeTlsDomain = masking
                 )
+                // Changing any of these rewrites the tg://proxy link, which makes the
+                // entry already saved inside Telegram stale: its handshake then fails
+                // and Telegram reports the proxy as misconfigured. Offer to re-add it.
+                val linkChanged = updated.secretHex != options.secretHex ||
+                    updated.fakeTlsDomain != options.fakeTlsDomain ||
+                    updated.host != options.host ||
+                    updated.port != options.port
                 ProxyRuntime.saveOptions(this, updated)
                 // Saving a custom masking domain can flip Fake TLS on or off, so
                 // resync the switch from the saved options without firing its
@@ -357,6 +364,25 @@ class MainActivity : AppCompatActivity() {
                 if (ProxyRuntime.isRunning()) ProxyService.start(this)
                 renderState(ProxyRuntime.snapshot(this))
                 Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
+                if (linkChanged) promptReconnectTelegram()
+            }
+            .show()
+    }
+
+    /**
+     * The proxy link changed, so the proxy Telegram already has saved no longer
+     * matches this server. Until it is re-added Telegram keeps failing the
+     * handshake and shows "proxy uses incorrect settings".
+     */
+    private fun promptReconnectTelegram() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.link_changed_title)
+            .setMessage(R.string.link_changed_body)
+            .setNegativeButton(R.string.link_changed_later, null)
+            .setPositiveButton(R.string.link_changed_open) { _, _ ->
+                ProxyRuntime.start(this)
+                ProxyService.start(this)
+                ProxyRuntime.openTelegram(this)
             }
             .show()
     }
