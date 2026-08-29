@@ -262,9 +262,9 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ): Boolean {
+        val host = wsConnectHost(dcId, options.dcIpMap) ?: return false
         val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WEBSOCKET, dcId, isMedia)
         for (domain in wsDomains(dcId, isMedia)) {
-            val host = wsConnectHost(dcId, domain, options.dcIpMap)
             val connectStart = System.currentTimeMillis()
             val ws = try {
                 RawWebSocket.connect(host, domain, connectTimeout)
@@ -280,10 +280,7 @@ class TelegramProxy(
             val connectMs = System.currentTimeMillis() - connectStart
             wsConnections.incrementAndGet()
             routePlanner.markConnected(RouteMethod.WEBSOCKET, dcId, isMedia, connectMs)
-            // Show the host actually dialled: for DCs outside the redirect map it is
-            // the relay hostname, which is worth seeing in the journal.
-            val target = if (host == domain) domain else "$domain via $host"
-            ConnectionLog.connected(RouteMethod.WEBSOCKET, dcId, isMedia, connectMs, target)
+            ConnectionLog.connected(RouteMethod.WEBSOCKET, dcId, isMedia, connectMs, "$domain via $host")
             lastMessage = routePlanner.status()
             ws.sendBinary(relayInit)
             val sessionStart = System.currentTimeMillis()
@@ -853,14 +850,20 @@ class TelegramProxy(
         }
 
         /**
-         * Host to open the WebSocket relay against. A user override wins, then the
-         * built-in redirect map; a data centre that has neither is reached through
-         * the relay hostname itself, so DCs outside the redirect map still get a
-         * WebSocket route instead of silently skipping it. Resolving by name also
-         * lets IPv6-only mobile networks connect, which a hardcoded IPv4 cannot.
+         * Host to open the WebSocket relay against, or null when this data centre
+         * has no WebSocket relay. A user override wins, then the built-in redirect
+         * map.
+         *
+         * There is deliberately no fallback to the relay hostname: only the DCs in
+         * the redirect map are served by Telegram's web WebSocket relay (kws2 and
+         * kws4 resolve to the same endpoint, which is why upstream maps just those
+         * two). Dialling kwsN by name for other DCs reached something that completed
+         * the WebSocket handshake but never relayed a usable MTProto stream, and the
+         * client then reported the proxy as misconfigured. Resolving by name also
+         * routes through DNS, which is exactly what a censoring network controls.
          */
-        fun wsConnectHost(dcId: Int, domain: String, overrides: Map<Int, String>): String =
-            overrides[dcId] ?: dcRedirects[dcId] ?: domain
+        fun wsConnectHost(dcId: Int, overrides: Map<Int, String>): String? =
+            overrides[dcId] ?: dcRedirects[dcId]
 
         private fun wsDomains(dcId: Int, media: Boolean): List<String> {
             val dc = webDcId(dcId)
