@@ -24,12 +24,14 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.widget.SwitchCompat
 import com.flowseal.tgwsproxy.proxy.CfProxyBalancer
 import com.flowseal.tgwsproxy.proxy.ConnectionLog
+import com.flowseal.tgwsproxy.proxy.ProxyOptions
 import com.flowseal.tgwsproxy.proxy.ProxyRuntime
 import com.flowseal.tgwsproxy.proxy.ProxyStats
 import com.flowseal.tgwsproxy.proxy.TelegramProxy
 
 class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
+    private val separators = Regex("[,\\s]+")
     private lateinit var connectButton: Button
     private lateinit var checkConnectionButton: Button
     private lateinit var stopButton: Button
@@ -47,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var routeHealthValue: TextView
     private lateinit var connectionLogValue: TextView
     private lateinit var backgroundWarning: TextView
+    private lateinit var buildInfoValue: TextView
     private lateinit var fakeTlsSwitch: SwitchCompat
     private lateinit var cfProxySwitch: SwitchCompat
     private lateinit var proxyRow: View
@@ -69,6 +72,7 @@ class MainActivity : AppCompatActivity() {
         requestNotificationPermission()
         bindViews()
         bindActions()
+        buildInfoValue.text = buildInfoText()
         renderState(ProxyRuntime.snapshot(this))
         handler.post(refreshUi)
     }
@@ -96,6 +100,7 @@ class MainActivity : AppCompatActivity() {
         routeHealthValue = findViewById(R.id.routeHealthValue)
         connectionLogValue = findViewById(R.id.connectionLogValue)
         backgroundWarning = findViewById(R.id.backgroundWarning)
+        buildInfoValue = findViewById(R.id.buildInfoValue)
         fakeTlsSwitch = findViewById(R.id.fakeTlsSwitch)
         cfProxySwitch = findViewById(R.id.cfProxySwitch)
         proxyRow = findViewById(R.id.proxyRow)
@@ -151,6 +156,45 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
+    }
+
+    /**
+     * "TG for Work 1.8.2 · ключ D6:A9:66:D0" — the installed version and the
+     * signing certificate prefix. A stable key across versions is what lets
+     * updates install over the top instead of failing with a package conflict.
+     */
+    private fun buildInfoText(): String {
+        val version = runCatching {
+            packageManager.getPackageInfo(packageName, 0).versionName
+        }.getOrNull().orEmpty()
+        val fingerprint = signingFingerprintPrefix()
+        return buildString {
+            append("TG for Work")
+            if (version.isNotBlank()) append(" ").append(version)
+            if (fingerprint.isNotBlank()) append(" · ключ ").append(fingerprint)
+        }
+    }
+
+    private fun signingFingerprintPrefix(): String {
+        return runCatching {
+            val signatureBytes: ByteArray? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val info = packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
+            } else {
+                @Suppress("DEPRECATION")
+                val info = packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+                @Suppress("DEPRECATION")
+                info.signatures?.firstOrNull()?.toByteArray()
+            }
+            if (signatureBytes == null) {
+                ""
+            } else {
+                java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(signatureBytes)
+                    .take(4)
+                    .joinToString(":") { "%02X".format(it.toInt() and 0xFF) }
+            }
+        }.getOrDefault("")
     }
 
     override fun onResume() {
@@ -222,9 +266,22 @@ class MainActivity : AppCompatActivity() {
         val workerInput = view.findViewById<EditText>(R.id.workerDomainInput)
         val maskingInput = view.findViewById<EditText>(R.id.maskingDomainInput)
         val secretInput = view.findViewById<EditText>(R.id.secretInput)
+        val cfDomainInput = view.findViewById<EditText>(R.id.cfDomainInput)
+        val hostInput = view.findViewById<EditText>(R.id.hostInput)
+        val portInput = view.findViewById<EditText>(R.id.portInput)
+        val dcIpInput = view.findViewById<EditText>(R.id.dcIpInput)
+        val bufferInput = view.findViewById<EditText>(R.id.bufferInput)
+        val maxConnInput = view.findViewById<EditText>(R.id.maxConnInput)
+
         workerInput.setText(options.cfWorkerDomain)
         maskingInput.setText(options.fakeTlsDomain)
         secretInput.setText(options.secretHex)
+        cfDomainInput.setText(options.cfProxyUserDomain)
+        hostInput.setText(options.host)
+        portInput.setText(options.port.toString())
+        dcIpInput.setText(options.dcIpOverrides)
+        bufferInput.setText(options.bufferKb.toString())
+        maxConnInput.setText(options.maxConnections.toString())
 
         view.findViewById<Button>(R.id.generateSecretButton).setOnClickListener {
             secretInput.setText(TelegramProxy.generateSecret())
@@ -243,27 +300,54 @@ class MainActivity : AppCompatActivity() {
                 val worker = workerInput.text.toString().trim()
                 val masking = maskingInput.text.toString().trim()
                 val secret = secretInput.text.toString().trim().lowercase()
-                if (secret.isNotEmpty() &&
-                    !(secret.length == 32 && secret.all { it.isDigit() || it in 'a'..'f' })
-                ) {
-                    Toast.makeText(this, R.string.settings_invalid_secret, Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
+                val cfDomain = cfDomainInput.text.toString().trim()
+                val host = hostInput.text.toString().trim()
+                val portText = portInput.text.toString().trim()
+                val dcIps = dcIpInput.text.toString().trim()
+
+                if (secret.isNotEmpty() && !ProxyRuntime.isValidSecret(secret)) {
+                    toastError(R.string.settings_invalid_secret); return@setPositiveButton
                 }
-                val workerDomains = worker.split(Regex("[,\\s]+")).filter { it.isNotEmpty() }
-                if (workerDomains.any { CfProxyBalancer.normalizeDomain(it) == null }) {
-                    Toast.makeText(this, R.string.settings_invalid_worker, Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
+                if (worker.split(separators).filter { it.isNotEmpty() }
+                        .any { CfProxyBalancer.normalizeDomain(it) == null }
+                ) {
+                    toastError(R.string.settings_invalid_worker); return@setPositiveButton
                 }
                 if (masking.isNotEmpty() && CfProxyBalancer.normalizeDomain(masking) == null) {
-                    Toast.makeText(this, R.string.settings_invalid_masking, Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
+                    toastError(R.string.settings_invalid_masking); return@setPositiveButton
                 }
-                ProxyRuntime.saveSettings(
-                    this,
-                    worker,
-                    masking,
-                    if (secret.isEmpty()) options.secretHex else secret
+                if (cfDomain.isNotEmpty() && CfProxyBalancer.normalizeDomain(cfDomain) == null) {
+                    toastError(R.string.settings_invalid_masking); return@setPositiveButton
+                }
+                if (!isValidHost(host)) {
+                    toastError(R.string.settings_invalid_host); return@setPositiveButton
+                }
+                val port = portText.toIntOrNull()
+                if (port == null || port !in 1..65535) {
+                    toastError(R.string.settings_invalid_port); return@setPositiveButton
+                }
+                // Every non-empty DC:IP token must parse, otherwise a typo would be
+                // silently dropped and the user would think the override is active.
+                if (dcIps.split(separators).filter { it.isNotEmpty() }
+                        .any { ProxyOptions.parseDcIpPair(it) == null }
+                ) {
+                    toastError(R.string.settings_invalid_dcip); return@setPositiveButton
+                }
+
+                val updated = options.copy(
+                    host = host,
+                    port = port,
+                    secretHex = if (secret.isEmpty()) options.secretHex else secret,
+                    cfProxyUserDomain = cfDomain,
+                    cfWorkerDomain = worker,
+                    dcIpOverrides = dcIps,
+                    bufferKb = bufferInput.text.toString().trim().toIntOrNull()
+                        ?: ProxyOptions.DEFAULT_BUFFER_KB,
+                    maxConnections = maxConnInput.text.toString().trim().toIntOrNull()
+                        ?: ProxyOptions.DEFAULT_MAX_CONNECTIONS,
+                    fakeTlsDomain = masking
                 )
+                ProxyRuntime.saveOptions(this, updated)
                 // Saving a custom masking domain can flip Fake TLS on or off, so
                 // resync the switch from the saved options without firing its
                 // listener — otherwise a later toggle would overwrite the domain.
@@ -275,6 +359,18 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
             }
             .show()
+    }
+
+    private fun toastError(messageId: Int) {
+        Toast.makeText(this, messageId, Toast.LENGTH_LONG).show()
+    }
+
+    /** The local listen address: an IP literal, "localhost" or a plain hostname. */
+    private fun isValidHost(host: String): Boolean {
+        if (host.isBlank() || host.contains("://") || host.contains('/')) return false
+        return host == "localhost" ||
+            ProxyOptions.isIpAddress(host) ||
+            CfProxyBalancer.normalizeDomain(host) != null
     }
 
     private fun startProxy(openTelegram: Boolean) {

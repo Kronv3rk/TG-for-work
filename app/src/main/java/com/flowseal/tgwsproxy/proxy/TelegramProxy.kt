@@ -29,7 +29,10 @@ class TelegramProxy(
     private val options: ProxyOptions
 ) : Closeable {
     private val random = SecureRandom()
-    private val executor = newProxyExecutor()
+
+    /** Socket/relay buffer and worker-thread ceiling, both user-tunable. */
+    private val bufferSize = options.bufferBytes
+    private val executor = newProxyExecutor(options.threadLimit)
     private val cfBalancer = CfProxyBalancer()
     private val routePlanner = RoutePlanner()
     private val clients = CopyOnWriteArraySet<Socket>()
@@ -90,8 +93,8 @@ class TelegramProxy(
                     val socket = server.accept()
                     socket.tcpNoDelay = true
                     socket.keepAlive = true
-                    socket.receiveBufferSize = BUFFER_SIZE
-                    socket.sendBufferSize = BUFFER_SIZE
+                    socket.receiveBufferSize = bufferSize
+                    socket.sendBufferSize = bufferSize
                     clients += socket
                     totalConnections.incrementAndGet()
                     activeConnections.incrementAndGet()
@@ -259,7 +262,7 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ): Boolean {
-        val targetIp = dcRedirects[dcId] ?: return false
+        val targetIp = wsTargetIp(dcId) ?: return false
         val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WEBSOCKET, dcId, isMedia)
         for (domain in wsDomains(dcId, isMedia)) {
             val connectStart = System.currentTimeMillis()
@@ -366,7 +369,7 @@ class TelegramProxy(
         relayInit: ByteArray,
         crypto: CryptoContext
     ): Boolean {
-        val dst = defaultDcIps[dcId] ?: return false
+        val dst = directIp(dcId) ?: return false
         val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WORKER, dcId, isMedia)
         for (workerDomain in options.cfWorkerDomains.take(MAX_CF_ATTEMPTS)) {
             val path = "/apiws?dst=$dst&dc=$dcId"
@@ -411,15 +414,15 @@ class TelegramProxy(
         relayInit: ByteArray,
         crypto: CryptoContext
     ): Boolean {
-        val targetIp = defaultDcIps[dcId] ?: run {
+        val targetIp = directIp(dcId) ?: run {
             lastMessage = "DC$dcId не найден в карте Telegram"
             return false
         }
         Socket().use { remote ->
             remote.tcpNoDelay = true
             remote.keepAlive = true
-            remote.receiveBufferSize = BUFFER_SIZE
-            remote.sendBufferSize = BUFFER_SIZE
+            remote.receiveBufferSize = bufferSize
+            remote.sendBufferSize = bufferSize
             val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.TCP, dcId, isMedia)
             val connectStart = System.currentTimeMillis()
             remote.connect(java.net.InetSocketAddress(targetIp, 443), connectTimeout)
@@ -487,7 +490,7 @@ class TelegramProxy(
         }
 
         try {
-            val buffer = ByteArray(BUFFER_SIZE)
+            val buffer = ByteArray(bufferSize)
             try {
                 while (done.get() == 0) {
                     val read = clientIn.read(buffer)
@@ -526,7 +529,7 @@ class TelegramProxy(
         val sessionDown = AtomicLong(0)
         val down = try {
             executor.submit {
-                val buffer = ByteArray(BUFFER_SIZE)
+                val buffer = ByteArray(bufferSize)
                 try {
                     while (done.get() == 0) {
                         val read = remoteIn.read(buffer)
@@ -551,7 +554,7 @@ class TelegramProxy(
         }
 
         try {
-            val buffer = ByteArray(BUFFER_SIZE)
+            val buffer = ByteArray(bufferSize)
             try {
                 while (done.get() == 0) {
                     val read = clientIn.read(buffer)
@@ -571,6 +574,12 @@ class TelegramProxy(
         }
         return sessionDown.get()
     }
+
+    /** WebSocket relay address for a DC; a user override wins over the built-in map. */
+    private fun wsTargetIp(dcId: Int): String? = options.dcIpMap[dcId] ?: dcRedirects[dcId]
+
+    /** Direct address for a DC, used by the TCP fallback and as the worker's `dst`. */
+    private fun directIp(dcId: Int): String? = options.dcIpMap[dcId] ?: defaultDcIps[dcId]
 
     private fun tryHandshake(handshake: ByteArray): ParsedHandshake? {
         val clientDecPrekeyIv = handshake.copyOfRange(SKIP_LEN, SKIP_LEN + PREKEY_LEN + IV_LEN)
@@ -775,7 +784,6 @@ class TelegramProxy(
     companion object {
         const val DEFAULT_HOST = "127.0.0.1"
         const val DEFAULT_PORT = 1443
-        private const val BUFFER_SIZE = 256 * 1024
         private const val MAX_MTPROTO_PACKET_SIZE = 8 * 1024 * 1024
         private const val HANDSHAKE_LEN = 64
         private const val SKIP_LEN = 8
@@ -806,7 +814,6 @@ class TelegramProxy(
             2 to "149.154.167.220",
             4 to "149.154.167.220"
         )
-        private const val MAX_PROXY_THREADS = 96
         private const val MAX_CF_ATTEMPTS = 3
         private const val RECENT_EVENTS_LIMIT = 8
         private val defaultDcIps = mapOf(
@@ -819,7 +826,7 @@ class TelegramProxy(
         )
 
 
-        private fun newProxyExecutor(): ExecutorService {
+        private fun newProxyExecutor(maxThreads: Int): ExecutorService {
             val threadNumber = AtomicInteger(1)
             val factory = ThreadFactory { task ->
                 Thread(task, "tg-proxy-${threadNumber.getAndIncrement()}").apply {
@@ -828,7 +835,7 @@ class TelegramProxy(
             }
             return ThreadPoolExecutor(
                 0,
-                MAX_PROXY_THREADS,
+                maxThreads,
                 30L,
                 TimeUnit.SECONDS,
                 SynchronousQueue<Runnable>(),

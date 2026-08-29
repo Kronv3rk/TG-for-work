@@ -20,6 +20,11 @@ object ProxyRuntime {
     private const val KEY_CF_PRIORITY = "cf_priority"
     private const val KEY_CF_USER_DOMAIN = "cf_user_domain"
     private const val KEY_CF_WORKER_DOMAIN = "cf_worker_domain"
+    private const val KEY_HOST = "host"
+    private const val KEY_PORT = "port"
+    private const val KEY_DC_IPS = "dc_ips"
+    private const val KEY_BUFFER_KB = "buffer_kb"
+    private const val KEY_MAX_CONNECTIONS = "max_connections"
 
     @Volatile
     private var proxy: TelegramProxy? = null
@@ -97,23 +102,32 @@ object ProxyRuntime {
     }
 
     /**
-     * Persists user-editable settings — own Cloudflare Worker domain, Fake-TLS
-     * masking domain and secret — in one shot, then restarts the proxy if running
-     * so the new values take effect. A secret that is not 32 hex chars is ignored
-     * (the existing one is kept); callers should validate before saving.
+     * Persists every user-editable field of [options] and restarts the proxy if it
+     * is running, so new settings take effect immediately. Runtime-derived fields
+     * (the network type) are not stored. A secret that is not 32 hex chars is
+     * ignored and the existing one kept; callers validate before saving.
      */
-    fun saveSettings(context: Context, workerDomain: String, maskingDomain: String, secretHex: String) {
+    fun saveOptions(context: Context, options: ProxyOptions) {
         val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putString(KEY_CF_WORKER_DOMAIN, workerDomain.trim())
-            .putString(KEY_FAKE_TLS_DOMAIN, maskingDomain.trim())
-        val cleanSecret = secretHex.trim().lowercase()
-        if (cleanSecret.length == 32 && cleanSecret.all { it.isDigit() || it in 'a'..'f' }) {
+            .putString(KEY_CF_WORKER_DOMAIN, options.cfWorkerDomain.trim())
+            .putString(KEY_CF_USER_DOMAIN, options.cfProxyUserDomain.trim())
+            .putString(KEY_FAKE_TLS_DOMAIN, options.fakeTlsDomain.trim())
+            .putString(KEY_HOST, options.host.trim())
+            .putInt(KEY_PORT, options.port)
+            .putString(KEY_DC_IPS, options.dcIpOverrides.trim())
+            .putInt(KEY_BUFFER_KB, options.bufferKb)
+            .putInt(KEY_MAX_CONNECTIONS, options.maxConnections)
+        val cleanSecret = options.secretHex.trim().lowercase()
+        if (isValidSecret(cleanSecret)) {
             editor.putString(KEY_SECRET, cleanSecret)
         }
         editor.apply()
         if (isRunning()) restart(context)
     }
+
+    fun isValidSecret(secret: String): Boolean =
+        secret.length == 32 && secret.all { it.isDigit() || it in 'a'..'f' }
 
     fun copyLink(context: Context) {
         val link = currentLink(context)
@@ -141,11 +155,17 @@ object ProxyRuntime {
                 prefs.edit().putString(KEY_SECRET, it).apply()
             }
         return ProxyOptions(
+            host = prefs.getString(KEY_HOST, TelegramProxy.DEFAULT_HOST).orEmpty()
+                .ifBlank { TelegramProxy.DEFAULT_HOST },
+            port = prefs.getInt(KEY_PORT, TelegramProxy.DEFAULT_PORT),
             secretHex = secret,
             cfProxyEnabled = prefs.getBoolean(KEY_CF_ENABLED, true),
             cfProxyPriority = prefs.getBoolean(KEY_CF_PRIORITY, true),
             cfProxyUserDomain = prefs.getString(KEY_CF_USER_DOMAIN, "").orEmpty(),
             cfWorkerDomain = prefs.getString(KEY_CF_WORKER_DOMAIN, "").orEmpty(),
+            dcIpOverrides = prefs.getString(KEY_DC_IPS, "").orEmpty(),
+            bufferKb = prefs.getInt(KEY_BUFFER_KB, ProxyOptions.DEFAULT_BUFFER_KB),
+            maxConnections = prefs.getInt(KEY_MAX_CONNECTIONS, ProxyOptions.DEFAULT_MAX_CONNECTIONS),
             fakeTlsDomain = prefs.getString(KEY_FAKE_TLS_DOMAIN, ProxyOptions.DEFAULT_FAKE_TLS_DOMAIN)
                 .orEmpty(),
             cellularNetwork = isCellularNetwork(context)
