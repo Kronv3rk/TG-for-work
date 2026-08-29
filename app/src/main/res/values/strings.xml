@@ -84,4 +84,7 @@
     <string name="settings_invalid_secret">Секрет должен быть ровно 32 hex-символа</string>
     <string name="settings_invalid_worker">Некорректный домен Worker</string>
     <string name="settings_invalid_masking">Некорректный маскирующий домен</string>
+    <string name="background_warning">Android может усыплять прокси. Нажмите, чтобы разрешить фоновую работу без ограничений.</string>
+    <string name="background_ok">Фоновая работа разрешена</string>
+    <string name="background_hint">Если прокси всё равно засыпает, разрешите автозапуск приложения в настройках телефона (MIUI: Приложения → TG for Work → Автозапуск).</string>
 </resources>

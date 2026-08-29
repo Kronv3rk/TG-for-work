@@ -48,6 +48,7 @@ class ProxyService : Service() {
             }
             ACTION_STOP -> {
                 ProxyRuntime.stop()
+                ProxyKeepAlive.release()
                 stopForegroundCompat()
                 stopSelf()
                 return START_NOT_STICKY
@@ -63,14 +64,35 @@ class ProxyService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(refreshNotification)
         ProxyRuntime.stop()
+        ProxyKeepAlive.release()
         super.onDestroy()
+    }
+
+    /**
+     * Swiping the app out of recents must not take the proxy down: Telegram may
+     * still be using it. stopWithTask=false already keeps the service alive on
+     * stock Android; re-issuing the start intent additionally recovers on
+     * aggressive vendor ROMs (MIUI and friends) that kill it anyway.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (ProxyRuntime.isRunning()) {
+            runCatching { start(applicationContext) }
+        }
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startForegroundCompat() {
+        // Hold the CPU/Wi-Fi locks before going foreground: without them the
+        // relay sockets freeze as soon as the screen turns off.
+        ProxyKeepAlive.acquire(this)
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // From Android 15 a dataSync foreground service is stopped after ~6
+            // hours a day. A proxy is expected to stay up, so run as specialUse.
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(NOTIFICATION_ID, notification)
