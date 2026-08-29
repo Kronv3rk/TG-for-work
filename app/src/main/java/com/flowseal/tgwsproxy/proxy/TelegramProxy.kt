@@ -262,12 +262,12 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ): Boolean {
-        val targetIp = wsTargetIp(dcId) ?: return false
         val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WEBSOCKET, dcId, isMedia)
         for (domain in wsDomains(dcId, isMedia)) {
+            val host = wsConnectHost(dcId, domain, options.dcIpMap)
             val connectStart = System.currentTimeMillis()
             val ws = try {
-                RawWebSocket.connect(targetIp, domain, connectTimeout)
+                RawWebSocket.connect(host, domain, connectTimeout)
             } catch (redirect: WebSocketHandshakeException) {
                 if (!redirect.isRedirect) {
                     lastMessage = "WebSocket DC$dcId недоступен: ${redirect.statusLine}"
@@ -280,7 +280,10 @@ class TelegramProxy(
             val connectMs = System.currentTimeMillis() - connectStart
             wsConnections.incrementAndGet()
             routePlanner.markConnected(RouteMethod.WEBSOCKET, dcId, isMedia, connectMs)
-            ConnectionLog.connected(RouteMethod.WEBSOCKET, dcId, isMedia, connectMs, domain)
+            // Show the host actually dialled: for DCs outside the redirect map it is
+            // the relay hostname, which is worth seeing in the journal.
+            val target = if (host == domain) domain else "$domain via $host"
+            ConnectionLog.connected(RouteMethod.WEBSOCKET, dcId, isMedia, connectMs, target)
             lastMessage = routePlanner.status()
             ws.sendBinary(relayInit)
             val sessionStart = System.currentTimeMillis()
@@ -575,9 +578,6 @@ class TelegramProxy(
         return sessionDown.get()
     }
 
-    /** WebSocket relay address for a DC; a user override wins over the built-in map. */
-    private fun wsTargetIp(dcId: Int): String? = options.dcIpMap[dcId] ?: dcRedirects[dcId]
-
     /** Direct address for a DC, used by the TCP fallback and as the worker's `dst`. */
     private fun directIp(dcId: Int): String? = options.dcIpMap[dcId] ?: defaultDcIps[dcId]
 
@@ -851,6 +851,16 @@ class TelegramProxy(
             SecureRandom().nextBytes(bytes)
             return bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
         }
+
+        /**
+         * Host to open the WebSocket relay against. A user override wins, then the
+         * built-in redirect map; a data centre that has neither is reached through
+         * the relay hostname itself, so DCs outside the redirect map still get a
+         * WebSocket route instead of silently skipping it. Resolving by name also
+         * lets IPv6-only mobile networks connect, which a hardcoded IPv4 cannot.
+         */
+        fun wsConnectHost(dcId: Int, domain: String, overrides: Map<Int, String>): String =
+            overrides[dcId] ?: dcRedirects[dcId] ?: domain
 
         private fun wsDomains(dcId: Int, media: Boolean): List<String> {
             val dc = webDcId(dcId)
