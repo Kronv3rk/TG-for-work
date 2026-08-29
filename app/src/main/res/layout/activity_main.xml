@@ -151,6 +151,26 @@
                 android:textColor="@color/text_primary"
                 android:textSize="14sp" />
 
+            <TextView
+                android:id="@+id/backgroundWarning"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_status_idle"
+                android:drawableStart="@drawable/ic_power"
+                android:drawablePadding="8dp"
+                android:gravity="center_vertical"
+                android:lineSpacingExtra="2dp"
+                android:minHeight="48dp"
+                android:paddingLeft="14dp"
+                android:paddingTop="10dp"
+                android:paddingRight="14dp"
+                android:paddingBottom="10dp"
+                android:text="@string/background_warning"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:visibility="gone" />
+
             <Button
                 android:id="@+id/connectButton"
                 android:layout_width="match_parent"

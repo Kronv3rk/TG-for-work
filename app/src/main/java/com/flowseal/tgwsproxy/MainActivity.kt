@@ -3,12 +3,16 @@ package com.flowseal.tgwsproxy
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -42,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var footerBody: TextView
     private lateinit var routeHealthValue: TextView
     private lateinit var connectionLogValue: TextView
+    private lateinit var backgroundWarning: TextView
     private lateinit var fakeTlsSwitch: SwitchCompat
     private lateinit var cfProxySwitch: SwitchCompat
     private lateinit var proxyRow: View
@@ -90,6 +95,7 @@ class MainActivity : AppCompatActivity() {
         footerBody = findViewById(R.id.footerBody)
         routeHealthValue = findViewById(R.id.routeHealthValue)
         connectionLogValue = findViewById(R.id.connectionLogValue)
+        backgroundWarning = findViewById(R.id.backgroundWarning)
         fakeTlsSwitch = findViewById(R.id.fakeTlsSwitch)
         cfProxySwitch = findViewById(R.id.cfProxySwitch)
         proxyRow = findViewById(R.id.proxyRow)
@@ -134,6 +140,8 @@ class MainActivity : AppCompatActivity() {
         routeRow.setOnClickListener { cfProxySwitch.isChecked = !cfProxySwitch.isChecked }
         profileRow.setOnClickListener { showSettingsDialog() }
 
+        backgroundWarning.setOnClickListener { requestIgnoreBatteryOptimizations() }
+
         connectionLogValue.setOnLongClickListener {
             val log = ConnectionLog.fullText()
             if (log.isNotBlank()) {
@@ -143,6 +151,39 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateBackgroundWarning()
+    }
+
+    /**
+     * Android suspends background apps unless they are exempt from battery
+     * optimisation; while suspended the relay sockets stall and the proxy looks
+     * asleep. Surface a tappable banner only while the exemption is missing.
+     */
+    private fun updateBackgroundWarning() {
+        backgroundWarning.visibility = if (isIgnoringBatteryOptimizations()) View.GONE else View.VISIBLE
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        val power = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
+        return power.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            .setData(Uri.parse("package:$packageName"))
+        val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        try {
+            startActivity(direct)
+        } catch (ignored: Exception) {
+            runCatching { startActivity(fallback) }
+        }
+        Toast.makeText(this, R.string.background_hint, Toast.LENGTH_LONG).show()
     }
 
     /**
