@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.UserManager
 import android.util.Log
 import android.widget.Toast
 import com.flowseal.tgwsproxy.R
@@ -43,6 +44,7 @@ object ProxyRuntime {
                 existing.close()
                 proxy = null
             } else {
+                existing.updateNetwork(options)
                 existing.start()
                 return existing
             }
@@ -147,13 +149,37 @@ object ProxyRuntime {
         }
     }
 
+    /**
+     * Returns the stored proxy secret, generating one only the very first time.
+     *
+     * The secret is half of the tg://proxy link Telegram has saved, so minting a
+     * new one silently invalidates that saved proxy and Telegram then reports
+     * "the proxy is not configured correctly". Credential-protected storage is
+     * unreadable until the user unlocks the device after a reboot, and the
+     * foreground service can be restarted in exactly that window — reading an
+     * empty store there must never be mistaken for "no secret yet". So a new
+     * secret is generated only while storage is actually available, and it is
+     * written with commit() so it is durable before it is used.
+     */
+    private fun resolveSecret(context: Context, prefs: android.content.SharedPreferences): String {
+        prefs.getString(KEY_SECRET, null)?.takeIf(::isValidSecret)?.let { return it }
+        check(isStorageUnlocked(context)) {
+            "Storage is locked; refusing to generate a new proxy secret"
+        }
+        val generated = TelegramProxy.generateSecret()
+        prefs.edit().putString(KEY_SECRET, generated).commit()
+        return generated
+    }
+
+    private fun isStorageUnlocked(context: Context): Boolean {
+        val userManager = context.getSystemService(Context.USER_SERVICE) as? UserManager
+            ?: return true
+        return userManager.isUserUnlocked
+    }
+
     fun loadOptions(context: Context): ProxyOptions {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val secret = prefs.getString(KEY_SECRET, null)
-            ?.takeIf { it.length == 32 }
-            ?: TelegramProxy.generateSecret().also {
-                prefs.edit().putString(KEY_SECRET, it).apply()
-            }
+        val secret = resolveSecret(context, prefs)
         return ProxyOptions(
             host = prefs.getString(KEY_HOST, TelegramProxy.DEFAULT_HOST).orEmpty()
                 .ifBlank { TelegramProxy.DEFAULT_HOST },

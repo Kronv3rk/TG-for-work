@@ -53,6 +53,10 @@ class TelegramProxy(
     @Volatile
     private var lastMessage: String = "Прокси остановлен"
 
+    /** Same endpoint as [options], but carrying the current network type. */
+    @Volatile
+    private var networkOptions: ProxyOptions = options
+
     val proxyLink: String
         get() = if (options.fakeTlsEnabled) fakeTlsProxyLink else plainProxyLink
 
@@ -69,7 +73,15 @@ class TelegramProxy(
     val isRunning: Boolean
         get() = serverSocket?.isClosed == false
 
-    fun hasOptions(newOptions: ProxyOptions): Boolean = options == newOptions
+    fun hasOptions(newOptions: ProxyOptions): Boolean = options.sameConnection(newOptions)
+
+    /**
+     * The network type changed but the endpoint did not. Update it in place so route
+     * ordering follows the new network without restarting the proxy.
+     */
+    fun updateNetwork(newOptions: ProxyOptions) {
+        networkOptions = newOptions
+    }
 
     fun start() {
         if (isRunning) return
@@ -133,10 +145,10 @@ class TelegramProxy(
         fakeTlsEnabled = options.fakeTlsEnabled,
         cfProxyEnabled = options.cfProxyEnabled,
         routeStatus = routePlanner.status(),
-        routePolicy = routePlanner.policyLabel(options),
+        routePolicy = routePlanner.policyLabel(networkOptions),
         routeHealth = routePlanner.healthSummary(),
         recentEvents = ConnectionLog.recent(RECENT_EVENTS_LIMIT),
-        networkMode = if (options.cellularNetwork) "Мобильная сеть" else "Wi-Fi или локальная сеть",
+        networkMode = if (networkOptions.cellularNetwork) "Мобильная сеть" else "Wi-Fi или локальная сеть",
         lastMessage = lastMessage
     )
 
@@ -199,7 +211,7 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ) {
-        val methods = routePlanner.methodsFor(dcId, isMedia, options)
+        val methods = routePlanner.methodsFor(dcId, isMedia, networkOptions)
         for (method in methods) {
             routePlanner.markTrying(method, dcId, isMedia)
             lastMessage = routePlanner.status()

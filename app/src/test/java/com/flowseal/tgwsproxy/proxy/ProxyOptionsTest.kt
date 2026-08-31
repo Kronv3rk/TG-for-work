@@ -29,6 +29,25 @@ class ProxyOptionsTest {
     }
 
     @Test
+    fun networkTypeIsNotPartOfTheConnectionIdentity() {
+        // Switching Wi-Fi <-> mobile must not look like a different proxy, or the
+        // running proxy would be torn down and every Telegram connection dropped.
+        val wifi = ProxyOptions(secretHex = "abc", cellularNetwork = false)
+        val mobile = ProxyOptions(secretHex = "abc", cellularNetwork = true)
+        assertTrue(wifi.sameConnection(mobile))
+        assertFalse(wifi == mobile)
+    }
+
+    @Test
+    fun endpointChangesAreStillDifferentConnections() {
+        val base = ProxyOptions(secretHex = "abc")
+        assertFalse(base.sameConnection(base.copy(secretHex = "def")))
+        assertFalse(base.sameConnection(base.copy(port = 2443)))
+        assertFalse(base.sameConnection(base.copy(fakeTlsDomain = "example.com")))
+        assertFalse(base.sameConnection(base.copy(host = "0.0.0.0")))
+    }
+
+    @Test
     fun cfWorkerDomainsParsedFromMixedSeparators() {
         val options = ProxyOptions(
             secretHex = "abc",

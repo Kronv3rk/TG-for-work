@@ -44,6 +44,15 @@ data class ProxyOptions(
             .mapNotNull(::parseDcIpPair)
             .toMap()
 
+    /**
+     * True when [other] describes the same proxy endpoint. Deliberately ignores
+     * [cellularNetwork]: the network type only steers route ordering, so treating
+     * a Wi-Fi/mobile switch as a different configuration would tear the proxy down
+     * and drop every live Telegram connection for no reason.
+     */
+    fun sameConnection(other: ProxyOptions): Boolean =
+        copy(cellularNetwork = false) == other.copy(cellularNetwork = false)
+
     /** Socket and relay buffer size, clamped to a range that stays sane on mobile. */
     val bufferBytes: Int
         get() = bufferKb.coerceIn(MIN_BUFFER_KB, MAX_BUFFER_KB) * 1024
