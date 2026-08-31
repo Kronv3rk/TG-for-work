@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import com.flowseal.tgwsproxy.proxy.ConnectionLog
 import com.flowseal.tgwsproxy.proxy.ProxyRuntime
 
 class ProxyService : Service() {
@@ -31,6 +32,10 @@ class ProxyService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Before the user unlocks the device after a reboot the settings store is
+        // unreadable, so starting here would refuse to run rather than mint a new
+        // identity. Stay alive and let a later start command bring the proxy up.
+        if (!canStartProxy()) return START_STICKY
         when (intent?.action ?: ACTION_START) {
             ACTION_OPEN_TELEGRAM -> {
                 ProxyRuntime.start(this)
@@ -59,6 +64,14 @@ class ProxyService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    private fun canStartProxy(): Boolean {
+        val ok = runCatching { ProxyRuntime.loadOptions(applicationContext) }.isSuccess
+        if (!ok) {
+            ConnectionLog.info("Хранилище заблокировано, прокси стартует после разблокировки")
+        }
+        return ok
     }
 
     override fun onDestroy() {
