@@ -8,11 +8,14 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.ThreadPoolExecutor
@@ -42,6 +45,7 @@ class TelegramProxy(
     private val tcpFallbackConnections = AtomicInteger(0)
     private val cfProxyConnections = AtomicInteger(0)
     private val workerConnections = AtomicInteger(0)
+    private val frontingConnections = AtomicInteger(0)
     private val badConnections = AtomicInteger(0)
     private val maskedConnections = AtomicInteger(0)
     private val bytesUp = AtomicLong(0)
@@ -56,6 +60,20 @@ class TelegramProxy(
     /** Same endpoint as [options], but carrying the current network type. */
     @Volatile
     private var networkOptions: ProxyOptions = options
+
+    /** Pool refills dial on their own threads so they never take a client's slot in [executor]. */
+    private val poolExecutor = Executors.newCachedThreadPool(namedDaemonThreads("tg-ws-pool"))
+    private val wsPool = WsPool(
+        size = WsPool.DEFAULT_SIZE,
+        connector = { host, domain -> RawWebSocket.connect(host, domain, WsPool.CONNECT_TIMEOUT_MS) },
+        isOpen = RawWebSocket::isOpen,
+        isTargetBlocked = { routePlanner.isTargetBlocked(it) },
+        isActive = { networkOptions.wsPoolActive },
+        background = { poolExecutor.execute(it) }
+    )
+
+    @Volatile
+    private var poolMaintenance: ScheduledExecutorService? = null
 
     val proxyLink: String
         get() = if (options.fakeTlsEnabled) fakeTlsProxyLink else plainProxyLink
@@ -80,7 +98,13 @@ class TelegramProxy(
      * ordering follows the new network without restarting the proxy.
      */
     fun updateNetwork(newOptions: ProxyOptions) {
+        val changed = newOptions.cellularNetwork != networkOptions.cellularNetwork
         networkOptions = newOptions
+        if (changed) {
+            // Blocks and pooled sockets belong to the old network.
+            routePlanner.resetTargetCooldowns()
+            wsPool.clear()
+        }
     }
 
     fun start() {
@@ -96,6 +120,9 @@ class TelegramProxy(
         val server = ServerSocket(options.port, 50, address)
         server.reuseAddress = true
         serverSocket = server
+        if (options.wsPoolEnabled && poolMaintenance == null) {
+            poolMaintenance = WsPool.startMaintenance(wsPool)
+        }
         lastMessage = "Прокси слушает ${options.host}:${options.port}"
         // Run accept on a dedicated thread so client handlers and their download
         // workers (which share the bounded executor) can never starve the listener.
@@ -136,6 +163,9 @@ class TelegramProxy(
         tcpFallbackConnections = tcpFallbackConnections.get(),
         cfProxyConnections = cfProxyConnections.get(),
         workerConnections = workerConnections.get(),
+        frontingConnections = frontingConnections.get(),
+        poolHits = wsPool.hitCount,
+        poolMisses = wsPool.missCount,
         badConnections = badConnections.get(),
         maskedConnections = maskedConnections.get(),
         bytesUp = bytesUp.get(),
@@ -160,6 +190,10 @@ class TelegramProxy(
             runCatching { client.close() }
         }
         clients.clear()
+        poolMaintenance?.shutdownNow()
+        poolMaintenance = null
+        wsPool.close()
+        poolExecutor.shutdownNow()
         executor.shutdownNow()
     }
 
@@ -211,7 +245,8 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ) {
-        val methods = routePlanner.methodsFor(dcId, isMedia, networkOptions)
+        val wsTarget = wsConnectHost(dcId, options.dcIpMap)
+        val methods = routePlanner.methodsFor(dcId, isMedia, networkOptions, wsTarget)
         for (method in methods) {
             routePlanner.markTrying(method, dcId, isMedia)
             lastMessage = routePlanner.status()
@@ -228,6 +263,16 @@ class TelegramProxy(
                         crypto
                     )
                     RouteMethod.WEBSOCKET -> bridgeWebSocket(
+                        client,
+                        dcId,
+                        isMedia,
+                        clientIn,
+                        clientOut,
+                        relayInit,
+                        crypto,
+                        splitter
+                    )
+                    RouteMethod.FRONTING -> bridgeFronting(
                         client,
                         dcId,
                         isMedia,
@@ -275,8 +320,22 @@ class TelegramProxy(
         splitter: MtprotoPacketSplitter?
     ): Boolean {
         val host = wsConnectHost(dcId, options.dcIpMap) ?: return false
+        val domains = wsDomains(dcId, isMedia)
+
+        if (networkOptions.wsPoolActive) {
+            val pooled = wsPool.get(WsPool.Key(dcId, isMedia), host, domains)
+            if (pooled != null) {
+                wsConnections.incrementAndGet()
+                // No dial happened, so there is no latency sample to feed the route health.
+                routePlanner.markConnected(RouteMethod.WEBSOCKET, dcId, isMedia)
+                ConnectionLog.connected(RouteMethod.WEBSOCKET, dcId, isMedia, 0L, "пул · via $host")
+                relayOverWebSocket(RouteMethod.WEBSOCKET, dcId, isMedia, client, clientIn, clientOut, pooled, relayInit, crypto, splitter, fromPool = true)
+                return true
+            }
+        }
+
         val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WEBSOCKET, dcId, isMedia)
-        for (domain in wsDomains(dcId, isMedia)) {
+        for (domain in domains) {
             val connectStart = System.currentTimeMillis()
             val ws = try {
                 RawWebSocket.connect(host, domain, connectTimeout)
@@ -285,6 +344,12 @@ class TelegramProxy(
                     lastMessage = "WebSocket DC$dcId недоступен: ${redirect.statusLine}"
                 }
                 null
+            } catch (timeout: SocketTimeoutException) {
+                // Silence rather than a refusal is what address blocking looks like;
+                // the other domain goes to the same address, so do not wait twice.
+                routePlanner.markTargetTimedOut(host)
+                ConnectionLog.info("WS адрес $host не ответил вовремя, пропускаем его на час")
+                return false
             } catch (ignored: Exception) {
                 null
             } ?: continue
@@ -293,27 +358,77 @@ class TelegramProxy(
             wsConnections.incrementAndGet()
             routePlanner.markConnected(RouteMethod.WEBSOCKET, dcId, isMedia, connectMs)
             ConnectionLog.connected(RouteMethod.WEBSOCKET, dcId, isMedia, connectMs, "$domain via $host")
-            lastMessage = routePlanner.status()
-            ws.sendBinary(relayInit)
-            val sessionStart = System.currentTimeMillis()
-            val received = bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter)
-            // The relay accepted us but never sent a byte: most likely a bad worker.
-            // Cool it down so the next reconnect (Telegram retries fast) avoids it.
-            if (received == 0L) {
-                routePlanner.markFailed(RouteMethod.WEBSOCKET, dcId, isMedia)
-                ConnectionLog.noData(RouteMethod.WEBSOCKET, dcId, isMedia)
-            } else {
-                ConnectionLog.sessionEnd(
-                    RouteMethod.WEBSOCKET,
-                    dcId,
-                    isMedia,
-                    System.currentTimeMillis() - sessionStart,
-                    received
-                )
-            }
+            relayOverWebSocket(RouteMethod.WEBSOCKET, dcId, isMedia, client, clientIn, clientOut, ws, relayInit, crypto, splitter)
             return true
         }
         return false
+    }
+
+    /**
+     * WebSocket to the same relay, but the TLS handshake presents the user's
+     * fronting SNI while the Host header still names the Telegram relay (upstream
+     * tg-ws-proxy's fronting fallback). One attempt; a failure rests the route.
+     */
+    private fun bridgeFronting(
+        client: Socket,
+        dcId: Int,
+        isMedia: Boolean,
+        clientIn: InputStream,
+        clientOut: OutputStream,
+        relayInit: ByteArray,
+        crypto: CryptoContext,
+        splitter: MtprotoPacketSplitter?
+    ): Boolean {
+        val host = wsConnectHost(dcId, options.dcIpMap) ?: return false
+        val sni = options.frontingSni.trim().ifEmpty { return false }
+        val domain = wsDomains(dcId, isMedia).first()
+        val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.FRONTING, dcId, isMedia)
+        val connectStart = System.currentTimeMillis()
+        val ws = try {
+            RawWebSocket.connect(host, domain, connectTimeout, sni = sni)
+        } catch (ignored: Exception) {
+            return false
+        }
+        val connectMs = System.currentTimeMillis() - connectStart
+        frontingConnections.incrementAndGet()
+        routePlanner.markConnected(RouteMethod.FRONTING, dcId, isMedia, connectMs)
+        ConnectionLog.connected(RouteMethod.FRONTING, dcId, isMedia, connectMs, "$domain via $host, SNI $sni")
+        relayOverWebSocket(RouteMethod.FRONTING, dcId, isMedia, client, clientIn, clientOut, ws, relayInit, crypto, splitter)
+        return true
+    }
+
+    /** Sends the relay init, bridges the session and records how it went. */
+    private fun relayOverWebSocket(
+        method: RouteMethod,
+        dcId: Int,
+        isMedia: Boolean,
+        client: Socket,
+        clientIn: InputStream,
+        clientOut: OutputStream,
+        ws: RawWebSocket,
+        relayInit: ByteArray,
+        crypto: CryptoContext,
+        splitter: MtprotoPacketSplitter?,
+        fromPool: Boolean = false
+    ) {
+        lastMessage = routePlanner.status()
+        ws.sendBinary(relayInit)
+        val sessionStart = System.currentTimeMillis()
+        val received = bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter)
+        if (received == 0L) {
+            if (fromPool) {
+                // A pooled socket can go stale while it waits; that says nothing
+                // about the route itself, so do not cool it down.
+                ConnectionLog.info("${method.label} DC$dcId: соединение из пула устарело")
+            } else {
+                // The relay accepted us but never sent a byte: most likely a bad relay.
+                // Cool it down so the next reconnect (Telegram retries fast) avoids it.
+                routePlanner.markFailed(method, dcId, isMedia)
+                ConnectionLog.noData(method, dcId, isMedia)
+            }
+        } else {
+            ConnectionLog.sessionEnd(method, dcId, isMedia, System.currentTimeMillis() - sessionStart, received)
+        }
     }
 
     private fun bridgeCfProxyFallback(
@@ -686,114 +801,9 @@ class TelegramProxy(
         val telegramDecrypt: Cipher
     )
 
-    private inner class MtprotoPacketSplitter(relayInit: ByteArray, private val protocol: Int) {
-        private val decrypt = aesCtr(
-            relayInit.copyOfRange(SKIP_LEN, SKIP_LEN + KEY_LEN),
-            relayInit.copyOfRange(SKIP_LEN + KEY_LEN, SKIP_LEN + KEY_LEN + IV_LEN)
-        )
-        private var cipherBuffer = ByteArray(0)
-        private var plainBuffer = ByteArray(0)
-        private var disabled = false
-
-        init {
-            decrypt.update(ZERO_64)
-        }
-
-        fun split(chunk: ByteArray): List<ByteArray> {
-            if (chunk.isEmpty()) return emptyList()
-            if (disabled) return listOf(chunk)
-
-            val plain = decrypt.update(chunk)
-            cipherBuffer = cipherBuffer.append(chunk)
-            plainBuffer = plainBuffer.append(plain)
-
-            val parts = mutableListOf<ByteArray>()
-            while (cipherBuffer.isNotEmpty()) {
-                val packetLength = nextPacketLength() ?: break
-                if (packetLength <= 0 || packetLength > MAX_MTPROTO_PACKET_SIZE) {
-                    parts += cipherBuffer
-                    clearBuffers()
-                    disabled = true
-                    break
-                }
-                parts += cipherBuffer.copyOfRange(0, packetLength)
-                consume(packetLength)
-            }
-            return parts
-        }
-
-        fun flush(): List<ByteArray> {
-            if (cipherBuffer.isEmpty()) return emptyList()
-            val tail = cipherBuffer
-            clearBuffers()
-            return listOf(tail)
-        }
-
-        private fun consume(length: Int) {
-            cipherBuffer = cipherBuffer.copyOfRange(length, cipherBuffer.size)
-            plainBuffer = plainBuffer.copyOfRange(length, plainBuffer.size)
-        }
-
-        private fun clearBuffers() {
-            cipherBuffer = ByteArray(0)
-            plainBuffer = ByteArray(0)
-        }
-
-        private fun nextPacketLength(): Int? {
-            if (plainBuffer.isEmpty()) return null
-            return when (protocol) {
-                PROTO_ABRIDGED_INT -> nextAbridgedLength()
-                PROTO_INTERMEDIATE_INT, PROTO_PADDED_INTERMEDIATE_INT -> nextIntermediateLength()
-                else -> 0
-            }
-        }
-
-        private fun nextAbridgedLength(): Int? {
-            val first = plainBuffer[0].toInt() and 0xFF
-            val headerLength: Int
-            val payloadLength: Int
-            if (first == 0x7F || first == 0xFF) {
-                if (plainBuffer.size < 4) return null
-                payloadLength = (
-                    (plainBuffer[1].toInt() and 0xFF) or
-                        ((plainBuffer[2].toInt() and 0xFF) shl 8) or
-                        ((plainBuffer[3].toInt() and 0xFF) shl 16)
-                    ) * 4
-                headerLength = 4
-            } else {
-                payloadLength = (first and 0x7F) * 4
-                headerLength = 1
-            }
-            if (payloadLength <= 0 || payloadLength > MAX_MTPROTO_PACKET_SIZE) return 0
-            val packetLength = headerLength + payloadLength
-            return if (plainBuffer.size >= packetLength) packetLength else null
-        }
-
-        private fun nextIntermediateLength(): Int? {
-            if (plainBuffer.size < 4) return null
-            val payloadLength = (
-                (plainBuffer[0].toInt() and 0xFF) or
-                    ((plainBuffer[1].toInt() and 0xFF) shl 8) or
-                    ((plainBuffer[2].toInt() and 0xFF) shl 16) or
-                    ((plainBuffer[3].toInt() and 0x7F) shl 24)
-                )
-            if (payloadLength <= 0 || payloadLength > MAX_MTPROTO_PACKET_SIZE) return 0
-            val packetLength = 4 + payloadLength
-            return if (plainBuffer.size >= packetLength) packetLength else null
-        }
-
-        private fun ByteArray.append(chunk: ByteArray): ByteArray {
-            if (isEmpty()) return chunk.copyOf()
-            val combined = copyOf(size + chunk.size)
-            System.arraycopy(chunk, 0, combined, size, chunk.size)
-            return combined
-        }
-    }
-
     companion object {
         const val DEFAULT_HOST = "127.0.0.1"
         const val DEFAULT_PORT = 1443
-        private const val MAX_MTPROTO_PACKET_SIZE = 8 * 1024 * 1024
         private const val HANDSHAKE_LEN = 64
         private const val SKIP_LEN = 8
         private const val PREKEY_LEN = 32
@@ -801,9 +811,9 @@ class TelegramProxy(
         private const val IV_LEN = 16
         private const val PROTO_TAG_POS = 56
         private const val DC_IDX_POS = 60
-        private const val PROTO_ABRIDGED_INT = -269488145
-        private const val PROTO_INTERMEDIATE_INT = -286331154
-        private const val PROTO_PADDED_INTERMEDIATE_INT = -572662307
+        private const val PROTO_ABRIDGED_INT = MtprotoPacketSplitter.PROTO_ABRIDGED_INT
+        private const val PROTO_INTERMEDIATE_INT = MtprotoPacketSplitter.PROTO_INTERMEDIATE_INT
+        private const val PROTO_PADDED_INTERMEDIATE_INT = MtprotoPacketSplitter.PROTO_PADDED_INTERMEDIATE_INT
         private val ZERO_64 = ByteArray(64)
         private val reservedFirstBytes = setOf(0xEF)
         private val reservedStarts = listOf(
@@ -835,20 +845,23 @@ class TelegramProxy(
         )
 
 
-        private fun newProxyExecutor(maxThreads: Int): ExecutorService {
+        private fun namedDaemonThreads(prefix: String): ThreadFactory {
             val threadNumber = AtomicInteger(1)
-            val factory = ThreadFactory { task ->
-                Thread(task, "tg-proxy-${threadNumber.getAndIncrement()}").apply {
+            return ThreadFactory { task ->
+                Thread(task, "$prefix-${threadNumber.getAndIncrement()}").apply {
                     isDaemon = true
                 }
             }
+        }
+
+        private fun newProxyExecutor(maxThreads: Int): ExecutorService {
             return ThreadPoolExecutor(
                 0,
                 maxThreads,
                 30L,
                 TimeUnit.SECONDS,
                 SynchronousQueue<Runnable>(),
-                factory,
+                namedDaemonThreads("tg-proxy"),
                 ThreadPoolExecutor.AbortPolicy()
             ).apply {
                 allowCoreThreadTimeOut(true)
@@ -912,6 +925,5 @@ class TelegramProxy(
             }
         }
 
-        private fun List<Byte>.toByteArray(): ByteArray = ByteArray(size) { this[it] }
     }
 }

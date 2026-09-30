@@ -2,6 +2,7 @@ package com.flowseal.tgwsproxy.proxy
 
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -74,5 +75,26 @@ class ConnectionLogTest {
         assertTrue(text.contains("alpha"))
         assertTrue(text.contains("beta"))
         assertEquals(2, text.lines().size)
+    }
+
+    @Test
+    fun censorMasksDomainsLikeUpstream() {
+        assertEquals("my-w*****.exa****.com", ConnectionLog.censorDomains("my-worker.example.com"))
+        assertEquals("CFW DC2 · abc***.wor****.dev ok", ConnectionLog.censorDomains("CFW DC2 · abcdef.workers.dev ok"))
+    }
+
+    @Test
+    fun censorKeepsTelegramAndAddresses() {
+        val text = "WS DC2 kws2.web.telegram.org via 149.154.167.220"
+        assertEquals(text, ConnectionLog.censorDomains(text))
+    }
+
+    @Test
+    fun fullTextCanBeCensored() {
+        ConnectionLog.connected(RouteMethod.CLOUDFLARE, 2, false, 100, "kws2.secret.co.uk")
+        assertTrue(ConnectionLog.fullText().contains("kws2.secret.co.uk"))
+        val censored = ConnectionLog.fullText(censored = true)
+        assertFalse(censored.contains("secret"))
+        assertTrue(censored.contains("kw**.sec***.c*.uk"))
     }
 }

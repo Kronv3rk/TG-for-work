@@ -26,6 +26,8 @@ object ProxyRuntime {
     private const val KEY_DC_IPS = "dc_ips"
     private const val KEY_BUFFER_KB = "buffer_kb"
     private const val KEY_MAX_CONNECTIONS = "max_connections"
+    private const val KEY_WS_POOL = "ws_pool"
+    private const val KEY_FRONTING_SNI = "fronting_sni"
 
     @Volatile
     private var proxy: TelegramProxy? = null
@@ -120,6 +122,8 @@ object ProxyRuntime {
             .putString(KEY_DC_IPS, options.dcIpOverrides.trim())
             .putInt(KEY_BUFFER_KB, options.bufferKb)
             .putInt(KEY_MAX_CONNECTIONS, options.maxConnections)
+            .putBoolean(KEY_WS_POOL, options.wsPoolEnabled)
+            .putString(KEY_FRONTING_SNI, options.frontingSni.trim())
         val cleanSecret = options.secretHex.trim().lowercase()
         if (isValidSecret(cleanSecret)) {
             editor.putString(KEY_SECRET, cleanSecret)
@@ -194,6 +198,8 @@ object ProxyRuntime {
             maxConnections = prefs.getInt(KEY_MAX_CONNECTIONS, ProxyOptions.DEFAULT_MAX_CONNECTIONS),
             fakeTlsDomain = prefs.getString(KEY_FAKE_TLS_DOMAIN, ProxyOptions.DEFAULT_FAKE_TLS_DOMAIN)
                 .orEmpty(),
+            wsPoolEnabled = prefs.getBoolean(KEY_WS_POOL, true),
+            frontingSni = prefs.getString(KEY_FRONTING_SNI, "").orEmpty(),
             cellularNetwork = isCellularNetwork(context)
         )
     }

@@ -102,7 +102,12 @@ class CfProxyBalancer {
             "khgrre.com",
             "ulihssf.com",
             "tmhqsdqmfpmk.com",
-            "xwuwoqbm.com"
+            "xwuwoqbm.com",
+            "orgcnunpj.com",
+            "zhkuldz.com",
+            "zypoljnslxa.com",
+            "efabnxaowuzs.com",
+            "zaftuzsftqdq.com"
         )
         private const val DECODED_SUFFIX = ".co.uk"
 

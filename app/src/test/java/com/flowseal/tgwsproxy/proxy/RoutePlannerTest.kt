@@ -10,13 +10,15 @@ class RoutePlannerTest {
         cf: Boolean = true,
         cfPriority: Boolean = true,
         cellular: Boolean = false,
-        worker: String = ""
+        worker: String = "",
+        fronting: String = ""
     ) = ProxyOptions(
         secretHex = "00112233445566778899aabbccddeeff",
         cfProxyEnabled = cf,
         cfProxyPriority = cfPriority,
         cfWorkerDomain = worker,
-        cellularNetwork = cellular
+        cellularNetwork = cellular,
+        frontingSni = fronting
     )
 
     @Test
@@ -150,5 +152,73 @@ class RoutePlannerTest {
         val planner = RoutePlanner()
         val methods = planner.methodsFor(2, false, options())
         assertFalse(methods.contains(RouteMethod.WORKER))
+    }
+
+    private val relay = "149.154.167.220"
+
+    @Test
+    fun timedOutRelaySkipsWebSocketButKeepsFrontingAndTcp() {
+        val planner = RoutePlanner()
+        planner.markTargetTimedOut(relay)
+        val methods = planner.methodsFor(2, false, options(fronting = "example.org"), relay)
+        assertFalse(methods.contains(RouteMethod.WEBSOCKET))
+        assertTrue(methods.contains(RouteMethod.FRONTING))
+        assertTrue(methods.contains(RouteMethod.TCP))
+        assertTrue(methods.contains(RouteMethod.CLOUDFLARE))
+    }
+
+    @Test
+    fun timedOutRelayBlocksEveryDcBehindIt() {
+        val planner = RoutePlanner()
+        planner.markTargetTimedOut(relay)
+        assertFalse(planner.methodsFor(4, true, options(), relay).contains(RouteMethod.WEBSOCKET))
+    }
+
+    @Test
+    fun timedOutRelayIsStillTriedWithoutAnyFallbackRelay() {
+        val planner = RoutePlanner()
+        planner.markTargetTimedOut(relay)
+        assertTrue(planner.methodsFor(2, false, options(cf = false), relay).contains(RouteMethod.WEBSOCKET))
+    }
+
+    @Test
+    fun blockedRelayStaysSkippedEvenWhenEveryOtherRouteCoolsDown() {
+        val planner = RoutePlanner()
+        planner.markTargetTimedOut(relay)
+        for (method in RouteMethod.values()) planner.markFailed(method, 2, false)
+        val methods = planner.methodsFor(2, false, options(), relay)
+        assertTrue(methods.isNotEmpty())
+        assertFalse(methods.contains(RouteMethod.WEBSOCKET))
+    }
+
+    @Test
+    fun networkChangeLiftsRelayBlock() {
+        val planner = RoutePlanner()
+        planner.markTargetTimedOut(relay)
+        planner.resetTargetCooldowns()
+        assertFalse(planner.isTargetBlocked(relay))
+        assertTrue(planner.methodsFor(2, false, options(), relay).contains(RouteMethod.WEBSOCKET))
+    }
+
+    @Test
+    fun frontingFollowsWebSocketWhenConfigured() {
+        val planner = RoutePlanner()
+        val methods = planner.methodsFor(2, false, options(cf = false, fronting = "example.org"))
+        assertEquals(listOf(RouteMethod.WEBSOCKET, RouteMethod.FRONTING, RouteMethod.TCP), methods)
+    }
+
+    @Test
+    fun frontingAbsentByDefault() {
+        val planner = RoutePlanner()
+        assertFalse(planner.methodsFor(2, false, options()).contains(RouteMethod.FRONTING))
+        assertFalse(planner.healthSummary().contains("FR"))
+    }
+
+    @Test
+    fun failedFrontingRestsForHalfAnHour() {
+        val planner = RoutePlanner()
+        planner.markFailed(RouteMethod.FRONTING, 2, false)
+        assertFalse(planner.methodsFor(2, false, options(fronting = "example.org")).contains(RouteMethod.FRONTING))
+        assertEquals(1_800_000L, RouteMethod.FRONTING.cooldownMs)
     }
 }

@@ -125,4 +125,20 @@ class ProxyOptionsTest {
         assertTrue(options.cfWorkerDomains.isEmpty())
         assertFalse(options.cfWorkerEnabled)
     }
+
+    @Test
+    fun poolIsOnlyActiveOffCellular() {
+        val base = ProxyOptions(secretHex = "00112233445566778899aabbccddeeff")
+        assertTrue(base.wsPoolActive)
+        assertFalse(base.copy(cellularNetwork = true).wsPoolActive)
+        assertFalse(base.copy(wsPoolEnabled = false).wsPoolActive)
+    }
+
+    @Test
+    fun frontingIsOffUntilSniIsSet() {
+        val base = ProxyOptions(secretHex = "00112233445566778899aabbccddeeff")
+        assertFalse(base.frontingEnabled)
+        assertTrue(base.copy(frontingSni = "example.org").frontingEnabled)
+        assertFalse(base.sameConnection(base.copy(frontingSni = "example.org")))
+    }
 }

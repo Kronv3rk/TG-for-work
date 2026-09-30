@@ -72,10 +72,38 @@ object ConnectionLog {
         return snapshot.asReversed().take(limit).map(::format)
     }
 
-    fun fullText(): String {
+    /**
+     * The whole journal, latest first. [censored] masks domains for text that leaves
+     * the device (copy/share): the on-screen journal keeps them readable, since
+     * knowing which Worker or Cloudflare domain failed is what makes it useful.
+     */
+    fun fullText(censored: Boolean = false): String {
         val snapshot = synchronized(lock) { entries.toList() }
-        return snapshot.asReversed().joinToString("\n", transform = ::format)
+        val text = snapshot.asReversed().joinToString("\n", transform = ::format)
+        return if (censored) censorDomains(text) else text
     }
+
+    /**
+     * Masks every domain except Telegram's own, the way upstream tg-ws-proxy's
+     * DomainCensorFilter does: each label but the last keeps its first half and the
+     * rest becomes `*` ("my-worker.example.com" -> "my-w*****.exa****.com").
+     * IP addresses are left alone because the pattern needs a letter-only TLD.
+     */
+    fun censorDomains(text: String): String = DOMAIN_REGEX.replace(text) { match ->
+        val domain = match.value
+        val normalized = domain.lowercase(Locale.US).trimEnd('.')
+        if (normalized == "telegram.org" || normalized.endsWith(".telegram.org")) {
+            return@replace domain
+        }
+        val labels = domain.split('.')
+        labels.mapIndexed { index, label ->
+            if (index == labels.lastIndex) label else label.take(label.length / 2) + "*".repeat(label.length - label.length / 2)
+        }.joinToString(".")
+    }
+
+    private val DOMAIN_REGEX = Regex(
+        "(?<![\\w-])(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}(?![\\w-])"
+    )
 
     fun size(): Int = synchronized(lock) { entries.size }
 
