@@ -686,114 +686,9 @@ class TelegramProxy(
         val telegramDecrypt: Cipher
     )
 
-    private inner class MtprotoPacketSplitter(relayInit: ByteArray, private val protocol: Int) {
-        private val decrypt = aesCtr(
-            relayInit.copyOfRange(SKIP_LEN, SKIP_LEN + KEY_LEN),
-            relayInit.copyOfRange(SKIP_LEN + KEY_LEN, SKIP_LEN + KEY_LEN + IV_LEN)
-        )
-        private var cipherBuffer = ByteArray(0)
-        private var plainBuffer = ByteArray(0)
-        private var disabled = false
-
-        init {
-            decrypt.update(ZERO_64)
-        }
-
-        fun split(chunk: ByteArray): List<ByteArray> {
-            if (chunk.isEmpty()) return emptyList()
-            if (disabled) return listOf(chunk)
-
-            val plain = decrypt.update(chunk)
-            cipherBuffer = cipherBuffer.append(chunk)
-            plainBuffer = plainBuffer.append(plain)
-
-            val parts = mutableListOf<ByteArray>()
-            while (cipherBuffer.isNotEmpty()) {
-                val packetLength = nextPacketLength() ?: break
-                if (packetLength <= 0 || packetLength > MAX_MTPROTO_PACKET_SIZE) {
-                    parts += cipherBuffer
-                    clearBuffers()
-                    disabled = true
-                    break
-                }
-                parts += cipherBuffer.copyOfRange(0, packetLength)
-                consume(packetLength)
-            }
-            return parts
-        }
-
-        fun flush(): List<ByteArray> {
-            if (cipherBuffer.isEmpty()) return emptyList()
-            val tail = cipherBuffer
-            clearBuffers()
-            return listOf(tail)
-        }
-
-        private fun consume(length: Int) {
-            cipherBuffer = cipherBuffer.copyOfRange(length, cipherBuffer.size)
-            plainBuffer = plainBuffer.copyOfRange(length, plainBuffer.size)
-        }
-
-        private fun clearBuffers() {
-            cipherBuffer = ByteArray(0)
-            plainBuffer = ByteArray(0)
-        }
-
-        private fun nextPacketLength(): Int? {
-            if (plainBuffer.isEmpty()) return null
-            return when (protocol) {
-                PROTO_ABRIDGED_INT -> nextAbridgedLength()
-                PROTO_INTERMEDIATE_INT, PROTO_PADDED_INTERMEDIATE_INT -> nextIntermediateLength()
-                else -> 0
-            }
-        }
-
-        private fun nextAbridgedLength(): Int? {
-            val first = plainBuffer[0].toInt() and 0xFF
-            val headerLength: Int
-            val payloadLength: Int
-            if (first == 0x7F || first == 0xFF) {
-                if (plainBuffer.size < 4) return null
-                payloadLength = (
-                    (plainBuffer[1].toInt() and 0xFF) or
-                        ((plainBuffer[2].toInt() and 0xFF) shl 8) or
-                        ((plainBuffer[3].toInt() and 0xFF) shl 16)
-                    ) * 4
-                headerLength = 4
-            } else {
-                payloadLength = (first and 0x7F) * 4
-                headerLength = 1
-            }
-            if (payloadLength <= 0 || payloadLength > MAX_MTPROTO_PACKET_SIZE) return 0
-            val packetLength = headerLength + payloadLength
-            return if (plainBuffer.size >= packetLength) packetLength else null
-        }
-
-        private fun nextIntermediateLength(): Int? {
-            if (plainBuffer.size < 4) return null
-            val payloadLength = (
-                (plainBuffer[0].toInt() and 0xFF) or
-                    ((plainBuffer[1].toInt() and 0xFF) shl 8) or
-                    ((plainBuffer[2].toInt() and 0xFF) shl 16) or
-                    ((plainBuffer[3].toInt() and 0x7F) shl 24)
-                )
-            if (payloadLength <= 0 || payloadLength > MAX_MTPROTO_PACKET_SIZE) return 0
-            val packetLength = 4 + payloadLength
-            return if (plainBuffer.size >= packetLength) packetLength else null
-        }
-
-        private fun ByteArray.append(chunk: ByteArray): ByteArray {
-            if (isEmpty()) return chunk.copyOf()
-            val combined = copyOf(size + chunk.size)
-            System.arraycopy(chunk, 0, combined, size, chunk.size)
-            return combined
-        }
-    }
-
     companion object {
         const val DEFAULT_HOST = "127.0.0.1"
         const val DEFAULT_PORT = 1443
-        private const val MAX_MTPROTO_PACKET_SIZE = 8 * 1024 * 1024
         private const val HANDSHAKE_LEN = 64
         private const val SKIP_LEN = 8
         private const val PREKEY_LEN = 32
@@ -801,9 +696,9 @@ class TelegramProxy(
         private const val IV_LEN = 16
         private const val PROTO_TAG_POS = 56
         private const val DC_IDX_POS = 60
-        private const val PROTO_ABRIDGED_INT = -269488145
-        private const val PROTO_INTERMEDIATE_INT = -286331154
-        private const val PROTO_PADDED_INTERMEDIATE_INT = -572662307
+        private const val PROTO_ABRIDGED_INT = MtprotoPacketSplitter.PROTO_ABRIDGED_INT
+        private const val PROTO_INTERMEDIATE_INT = MtprotoPacketSplitter.PROTO_INTERMEDIATE_INT
+        private const val PROTO_PADDED_INTERMEDIATE_INT = MtprotoPacketSplitter.PROTO_PADDED_INTERMEDIATE_INT
         private val ZERO_64 = ByteArray(64)
         private val reservedFirstBytes = setOf(0xEF)
         private val reservedStarts = listOf(
@@ -912,6 +807,5 @@ class TelegramProxy(
             }
         }
 
-        private fun List<Byte>.toByteArray(): ByteArray = ByteArray(size) { this[it] }
     }
 }

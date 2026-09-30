@@ -31,6 +31,10 @@ class RawWebSocket private constructor(
     @Volatile
     private var closed = false
 
+    /** True while the socket still looks usable; checked before a pooled socket is handed out. */
+    val isOpen: Boolean
+        get() = !closed && !socket.isClosed && !socket.isInputShutdown && !socket.isOutputShutdown
+
     fun sendBinary(data: ByteArray) {
         if (closed) throw EOFException("WebSocket closed")
         synchronized(output) {
@@ -175,11 +179,20 @@ class RawWebSocket private constructor(
         private val EMPTY_PAYLOAD = ByteArray(0)
         private val random = SecureRandom()
 
+        /**
+         * Opens a WebSocket to [domain] (sent as the HTTP Host) over TLS to [targetIp].
+         *
+         * [sni] overrides the TLS server name for domain fronting: the censor sees an
+         * innocuous name while the relay still routes on the Host header. The
+         * certificate chain is validated by the platform trust store as usual; the
+         * raw SSLSocket never verifies the hostname, so no custom TrustManager is needed.
+         */
         fun connect(
             targetIp: String,
             domain: String,
             timeoutMs: Int = 10_000,
-            path: String = "/apiws"
+            path: String = "/apiws",
+            sni: String? = null
         ): RawWebSocket {
             val plain = Socket()
             var ssl: SSLSocket? = null
@@ -192,10 +205,11 @@ class RawWebSocket private constructor(
                 plain.soTimeout = timeoutMs
 
                 val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
-                val connectedSsl = sslFactory.createSocket(plain, domain, 443, true) as SSLSocket
+                val serverName = sni ?: domain
+                val connectedSsl = sslFactory.createSocket(plain, serverName, 443, true) as SSLSocket
                 ssl = connectedSsl
                 connectedSsl.sslParameters = connectedSsl.sslParameters.apply {
-                    serverNames = listOf<SNIServerName>(SNIHostName(domain))
+                    serverNames = listOf<SNIServerName>(SNIHostName(serverName))
                 }
                 connectedSsl.startHandshake()
                 connectedSsl.soTimeout = timeoutMs

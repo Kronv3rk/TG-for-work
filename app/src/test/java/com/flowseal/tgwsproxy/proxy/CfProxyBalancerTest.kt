@@ -46,4 +46,12 @@ class CfProxyBalancerTest {
         assertFalse(CfProxyBalancer.isValidDomain("bad-.com"))
         assertFalse(CfProxyBalancer.isValidDomain(".com"))
     }
+
+    @Test
+    fun builtInPoolDecodesToValidDomains() {
+        val domains = CfProxyBalancer().getDomainsForDc(2)
+        assertEquals(20, domains.size)
+        assertEquals(domains.size, domains.distinct().size)
+        assertTrue(domains.all { CfProxyBalancer.isValidDomain(it) && it.endsWith(".co.uk") })
+    }
 }

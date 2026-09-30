@@ -148,7 +148,7 @@ class MainActivity : AppCompatActivity() {
         backgroundWarning.setOnClickListener { requestIgnoreBatteryOptimizations() }
 
         connectionLogValue.setOnLongClickListener {
-            val log = ConnectionLog.fullText()
+            val log = ConnectionLog.fullText(censored = true)
             if (log.isNotBlank()) {
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("TG for Work log", log))
