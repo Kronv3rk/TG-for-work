@@ -10,6 +10,9 @@ enum class RouteMethod(
 ) {
     WORKER("CFW", "CF Worker", 30_000L),
     WEBSOCKET("WS", "WebSocket", 45_000L),
+    // One attempt, then a long rest: a fronting SNI that is not whitelisted fails
+    // every time, and retrying it would only delay the next route (upstream: 30 min).
+    FRONTING("FR", "Fronting", 1_800_000L),
     CLOUDFLARE("CF", "Cloudflare", 30_000L),
     TCP("TCP", "TCP", 45_000L)
 }
@@ -18,13 +21,26 @@ class RoutePlanner {
     private val cooldownUntil = ConcurrentHashMap<RouteKey, Long>()
     private val lastFailureAt = ConcurrentHashMap<RouteKey, Long>()
     private val health = ConcurrentHashMap<RouteKey, RouteHealth>()
+    private val targetBlockedUntil = ConcurrentHashMap<String, Long>()
     private val lastStatus = AtomicReference("Маршрут ещё не выбран")
 
-    fun methodsFor(dcId: Int, isMedia: Boolean, options: ProxyOptions): List<RouteMethod> {
+    /**
+     * Routes to try for this DC, best first. [wsTarget] is the relay address the
+     * WebSocket and fronting routes would dial; when a connect to it recently timed
+     * out (see [markTargetTimedOut]) both are dropped so the client goes straight to
+     * Cloudflare or the Worker instead of waiting out another timeout.
+     */
+    fun methodsFor(dcId: Int, isMedia: Boolean, options: ProxyOptions, wsTarget: String? = null): List<RouteMethod> {
         val now = System.currentTimeMillis()
         clearExpiredCooldowns(now)
 
-        val base = baseOrder(isMedia, options)
+        val base = baseOrder(isMedia, options).let { order ->
+            if (wsTarget != null && isTargetBlocked(wsTarget, now) && hasRelayFallback(options)) {
+                order.filterNot { it.dialsWsTarget }
+            } else {
+                order
+            }
+        }
         val available = base.filterNot { method ->
             val until = cooldownUntil[RouteKey(method, dcId, isMedia)] ?: 0L
             until > now
@@ -54,6 +70,24 @@ class RoutePlanner {
         return if (sinceFailure in 0 until PROBATION_WINDOW_MS) PROBATION_CONNECT_MS else NORMAL_CONNECT_MS
     }
 
+    /**
+     * A WebSocket connect to [target] timed out. A timeout (not a refusal) is what
+     * address-level blocking looks like, and it hits every DC behind that relay, so
+     * the address is skipped for [TARGET_TIMEOUT_COOLDOWN_MS] (upstream ip_fail_until).
+     * The direct TCP route dials different addresses and is not affected.
+     */
+    fun markTargetTimedOut(target: String) {
+        targetBlockedUntil[target] = System.currentTimeMillis() + TARGET_TIMEOUT_COOLDOWN_MS
+    }
+
+    fun isTargetBlocked(target: String, now: Long = System.currentTimeMillis()): Boolean =
+        (targetBlockedUntil[target] ?: 0L) > now
+
+    /** A different network may not block the same addresses, so start over. */
+    fun resetTargetCooldowns() {
+        targetBlockedUntil.clear()
+    }
+
     fun policyLabel(options: ProxyOptions): String {
         val core = when {
             options.cellularNetwork && options.cfProxyEnabled -> "Авто: мобильная сеть, CF > WS > TCP"
@@ -61,7 +95,8 @@ class RoutePlanner {
             options.cfProxyEnabled -> "Авто: WS, CF для медиа, TCP запасной"
             else -> "Авто: WS > TCP"
         }
-        return if (options.cfWorkerEnabled) "Свой CF Worker → $core" else core
+        val withFronting = if (options.frontingEnabled) "$core, fronting" else core
+        return if (options.cfWorkerEnabled) "Свой CF Worker → $withFronting" else withFronting
     }
 
     fun status(): String = lastStatus.get()
@@ -92,7 +127,11 @@ class RoutePlanner {
      * "WS 92% 0.4с · CF 60% 1.2с · TCP —". Routes without measurements show "—".
      */
     fun healthSummary(): String {
-        return RouteMethod.values().joinToString(" · ") { method ->
+        val shown = RouteMethod.values().filter { method ->
+            // Fronting is opt-in; only list it once it has been tried.
+            method != RouteMethod.FRONTING || health.keys.any { it.method == method }
+        }
+        return shown.joinToString(" · ") { method ->
             val routeStats = health.entries.filter { it.key.method == method }.map { it.value }
             if (routeStats.isEmpty() || routeStats.all { it.samples == 0 }) {
                 "${method.label} —"
@@ -137,13 +176,31 @@ class RoutePlanner {
         // The user's own Cloudflare Worker is a private, blocking-resistant relay,
         // so try it first when configured; health ranking may reorder later if it
         // proves slower or starts failing.
-        return if (options.cfWorkerEnabled) listOf(RouteMethod.WORKER) + core else core
+        // Fronting reaches the same relay as WebSocket under a different SNI, so it
+        // is the natural next step when plain WebSocket is filtered by name.
+        val withFronting = if (options.frontingEnabled) {
+            core.flatMap { if (it == RouteMethod.WEBSOCKET) listOf(it, RouteMethod.FRONTING) else listOf(it) }
+        } else {
+            core
+        }
+        return if (options.cfWorkerEnabled) listOf(RouteMethod.WORKER) + withFronting else withFronting
     }
+
+    private fun hasRelayFallback(options: ProxyOptions): Boolean =
+        options.cfProxyEnabled || options.cfWorkerEnabled
+
+    private val RouteMethod.dialsWsTarget: Boolean
+        get() = this == RouteMethod.WEBSOCKET || this == RouteMethod.FRONTING
 
     private fun clearExpiredCooldowns(now: Long) {
         for (entry in cooldownUntil.entries) {
             if (entry.value <= now) {
                 cooldownUntil.remove(entry.key, entry.value)
+            }
+        }
+        for (entry in targetBlockedUntil.entries) {
+            if (entry.value <= now) {
+                targetBlockedUntil.remove(entry.key, entry.value)
             }
         }
         for (entry in lastFailureAt.entries) {
@@ -210,5 +267,6 @@ class RoutePlanner {
         const val NORMAL_CONNECT_MS = 8_000
         const val PROBATION_CONNECT_MS = 3_000
         const val PROBATION_WINDOW_MS = 120_000L
+        const val TARGET_TIMEOUT_COOLDOWN_MS = 3_600_000L
     }
 }

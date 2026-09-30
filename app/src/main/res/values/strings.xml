@@ -99,6 +99,12 @@
     <string name="settings_invalid_host">Некорректный локальный адрес</string>
     <string name="settings_invalid_port">Порт должен быть числом от 1 до 65535</string>
     <string name="settings_invalid_dcip">Некорректная пара DC:IP</string>
+    <string name="settings_pool_label">Держать WebSocket-соединения наготове (только Wi-Fi)</string>
+    <string name="settings_pool_hint">Чаты и медиа открываются быстрее. Соединения держатся только для используемых дата-центров и закрываются через 5 минут без активности.</string>
+    <string name="settings_fronting_label">Domain fronting: SNI (экспериментально)</string>
+    <string name="settings_fronting_hint">пусто — выключено; например домен, который ваш провайдер не блокирует</string>
+    <string name="settings_fronting_note">Прокси покажет провайдеру это имя сайта вместо Telegram. Сертификат по-прежнему проверяется, сам трафик Telegram зашифрован. Если маршрут не сработал, он отдыхает 30 минут.</string>
+    <string name="settings_invalid_fronting">Некорректный домен для fronting</string>
     <string name="settings_restart_hint">Настройки применены, прокси перезапущен</string>
     <string name="link_changed_title">Ссылка прокси изменилась</string>
     <string name="link_changed_body">Telegram хранит прежние настройки прокси, и они больше не подходят — из-за этого появляется сообщение «прокси использует некорректные настройки». Откройте Telegram с новой ссылкой, чтобы подключить прокси заново.</string>

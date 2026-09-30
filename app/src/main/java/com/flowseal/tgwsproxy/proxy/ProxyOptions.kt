@@ -12,6 +12,8 @@ data class ProxyOptions(
     val bufferKb: Int = DEFAULT_BUFFER_KB,
     val maxConnections: Int = DEFAULT_MAX_CONNECTIONS,
     val fakeTlsDomain: String = DEFAULT_FAKE_TLS_DOMAIN,
+    val wsPoolEnabled: Boolean = true,
+    val frontingSni: String = "",
     val cellularNetwork: Boolean = false
 ) {
     val fakeTlsEnabled: Boolean
@@ -19,6 +21,20 @@ data class ProxyOptions(
 
     val cfWorkerEnabled: Boolean
         get() = cfWorkerDomains.isNotEmpty()
+
+    /**
+     * Domain fronting is opt-in: the user supplies the TLS server name to present
+     * (one their network lets through). Blank means the route is off.
+     */
+    val frontingEnabled: Boolean
+        get() = frontingSni.isNotBlank()
+
+    /**
+     * Pre-opened WebSocket connections only on Wi-Fi: on cellular they would keep
+     * the radio awake for little gain, since Cloudflare is tried first there anyway.
+     */
+    val wsPoolActive: Boolean
+        get() = wsPoolEnabled && !cellularNetwork
 
     /**
      * User-supplied Cloudflare Worker domains, parsed from a comma/space/newline

@@ -15,6 +15,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
@@ -272,6 +273,8 @@ class MainActivity : AppCompatActivity() {
         val dcIpInput = view.findViewById<EditText>(R.id.dcIpInput)
         val bufferInput = view.findViewById<EditText>(R.id.bufferInput)
         val maxConnInput = view.findViewById<EditText>(R.id.maxConnInput)
+        val poolCheck = view.findViewById<CheckBox>(R.id.wsPoolCheck)
+        val frontingInput = view.findViewById<EditText>(R.id.frontingSniInput)
 
         workerInput.setText(options.cfWorkerDomain)
         maskingInput.setText(options.fakeTlsDomain)
@@ -282,6 +285,8 @@ class MainActivity : AppCompatActivity() {
         dcIpInput.setText(options.dcIpOverrides)
         bufferInput.setText(options.bufferKb.toString())
         maxConnInput.setText(options.maxConnections.toString())
+        poolCheck.isChecked = options.wsPoolEnabled
+        frontingInput.setText(options.frontingSni)
 
         view.findViewById<Button>(R.id.generateSecretButton).setOnClickListener {
             secretInput.setText(TelegramProxy.generateSecret())
@@ -304,6 +309,7 @@ class MainActivity : AppCompatActivity() {
                 val host = hostInput.text.toString().trim()
                 val portText = portInput.text.toString().trim()
                 val dcIps = dcIpInput.text.toString().trim()
+                val frontingSni = frontingInput.text.toString().trim().lowercase()
 
                 if (secret.isNotEmpty() && !ProxyRuntime.isValidSecret(secret)) {
                     toastError(R.string.settings_invalid_secret); return@setPositiveButton
@@ -318,6 +324,9 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (cfDomain.isNotEmpty() && CfProxyBalancer.normalizeDomain(cfDomain) == null) {
                     toastError(R.string.settings_invalid_masking); return@setPositiveButton
+                }
+                if (frontingSni.isNotEmpty() && CfProxyBalancer.normalizeDomain(frontingSni) == null) {
+                    toastError(R.string.settings_invalid_fronting); return@setPositiveButton
                 }
                 if (!isValidHost(host)) {
                     toastError(R.string.settings_invalid_host); return@setPositiveButton
@@ -345,7 +354,9 @@ class MainActivity : AppCompatActivity() {
                         ?: ProxyOptions.DEFAULT_BUFFER_KB,
                     maxConnections = maxConnInput.text.toString().trim().toIntOrNull()
                         ?: ProxyOptions.DEFAULT_MAX_CONNECTIONS,
-                    fakeTlsDomain = masking
+                    fakeTlsDomain = masking,
+                    wsPoolEnabled = poolCheck.isChecked,
+                    frontingSni = frontingSni
                 )
                 // Changing any of these rewrites the tg://proxy link, which makes the
                 // entry already saved inside Telegram stale: its handshake then fails
@@ -449,6 +460,17 @@ class MainActivity : AppCompatActivity() {
             append(stats.cfProxyConnections)
             append(" / TCP ")
             append(stats.tcpFallbackConnections)
+            if (stats.frontingConnections > 0) {
+                append(" / FR ")
+                append(stats.frontingConnections)
+            }
+            if (stats.poolHits + stats.poolMisses > 0) {
+                append("\nПул WS: ")
+                append(stats.poolHits)
+                append(" из ")
+                append(stats.poolHits + stats.poolMisses)
+                append(" соединений готовы заранее")
+            }
             if (stats.proxyLink.isNotBlank()) {
                 append("\n")
                 append("Режим ссылки: ")

@@ -22,8 +22,8 @@ android {
         applicationId = "com.flowseal.tgwsproxy"
         minSdk = 24
         targetSdk = 35
-        versionCode = 20
-        versionName = "1.8.5"
+        versionCode = 21
+        versionName = "1.9.0"
     }
 
     signingConfigs {

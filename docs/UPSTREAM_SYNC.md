@@ -2,6 +2,38 @@
 
 This Android port tracks the proxy-relevant parts of `Flowseal/tg-ws-proxy`.
 
+## Synced from TG WS Proxy v1.10.4 (app v1.9.0)
+
+- **WebSocket pool** (`proxy/pool.py` → `WsPool.kt`): pre-opened relay sockets per
+  (DC, media), rotated after 120 s, refill backoff 1 s → 1 h, no refill while the relay
+  address is blocked. Android limits on top of upstream: Wi-Fi only, and a pair that has
+  not been used for 5 min is closed and no longer refilled. A stale pooled socket that
+  yields no data does not cool the route down. Upstream's pool TODO (wrong `is_media`
+  domain) does not apply: the pool is keyed by (DC, media) and dials that pair's own
+  domain order.
+- **Relay address timeout** (upstream `ip_fail_until`, `9ff95d1`/`5eb7e00`): a WebSocket
+  connect *timeout* blocks that relay address for 1 h (both DC2 and DC4 sit behind it), stops
+  trying the other domain, and routes straight to Cloudflare/Worker. Only applies when one
+  of those is configured. Direct TCP dials different addresses and is untouched; the block
+  is lifted on a network change. The base connect timeout stays 8 s (upstream 5 s) until
+  latency data shows it is safe on cellular.
+- **Domain fronting** (`c8f6f8c`, `a0545cc`): `RouteMethod.FRONTING`, TLS to the relay
+  with a user-supplied SNI and the Telegram Host header, one attempt, 30 min rest after a
+  failure. Unlike upstream the SNI is not hard-coded (`sprinthost.ru`) and the route is
+  off by default. No custom TrustManager: the chain is still validated and the raw
+  SSLSocket does not verify hostnames. Upstream later moved fronting inside the pool;
+  that is not ported.
+- **O(N) packet splitter** (`49e62ca`): `MtprotoPacketSplitter` consumes by offset.
+- **Cloudflare fallback pool** refreshed to 20 domains.
+- **Domain censoring** (`c02398f`): applied to the copied journal only.
+
+Already equivalent here: no splitter on the Worker route (`ecf3d6f`), shuffled
+Cloudflare domains (`dfdb993`), user CF domain is never overwritten by the fetched list
+(`2995ae7`).
+
+Not ported (desktop-only): SSL-verification switch and certifi, tray/update dialogs,
+macOS/Linux packaging, log file rotation, Telegram test DCs.
+
 ## Synced / improved in v1.7.0
 
 - **Adaptive connect timeout** ported from upstream: a route that recently failed gets a short
