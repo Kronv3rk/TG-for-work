@@ -14,8 +14,9 @@ This Android port tracks the proxy-relevant parts of `Flowseal/tg-ws-proxy`.
 - **Relay address timeout** (upstream `ip_fail_until`, `9ff95d1`/`5eb7e00`): a WebSocket
   connect *timeout* blocks that relay address for 1 h (both DC2 and DC4 sit behind it), stops
   trying the other domain, and routes straight to Cloudflare/Worker. Only applies when one
-  of those is configured. Direct TCP dials different addresses and is untouched; the block
-  is lifted on a network change. The base connect timeout stays 8 s (upstream 5 s) until
+  of those is configured. Direct TCP dials different addresses and is untouched, and
+  fronting is kept (SNI filtering also looks like a timeout); the block is lifted on a
+  network change. The base connect timeout stays 8 s (upstream 5 s) until
   latency data shows it is safe on cellular.
 - **Domain fronting** (`c8f6f8c`, `a0545cc`): `RouteMethod.FRONTING`, TLS to the relay
   with a user-supplied SNI and the Telegram Host header, one attempt, 30 min rest after a

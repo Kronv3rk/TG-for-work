@@ -26,9 +26,12 @@ class RoutePlanner {
 
     /**
      * Routes to try for this DC, best first. [wsTarget] is the relay address the
-     * WebSocket and fronting routes would dial; when a connect to it recently timed
-     * out (see [markTargetTimedOut]) both are dropped so the client goes straight to
-     * Cloudflare or the Worker instead of waiting out another timeout.
+     * WebSocket route dials; when a connect to it recently timed out (see
+     * [markTargetTimedOut]) WebSocket is dropped so the client goes straight to
+     * Cloudflare or the Worker instead of waiting out another timeout. Fronting
+     * dials the same address but is kept: SNI filtering also shows up as a
+     * timeout, and getting past exactly that is what fronting is for. It has its
+     * own long cooldown if the address is truly unreachable.
      */
     fun methodsFor(dcId: Int, isMedia: Boolean, options: ProxyOptions, wsTarget: String? = null): List<RouteMethod> {
         val now = System.currentTimeMillis()
@@ -36,7 +39,7 @@ class RoutePlanner {
 
         val base = baseOrder(isMedia, options).let { order ->
             if (wsTarget != null && isTargetBlocked(wsTarget, now) && hasRelayFallback(options)) {
-                order.filterNot { it.dialsWsTarget }
+                order.filterNot { it == RouteMethod.WEBSOCKET }
             } else {
                 order
             }
@@ -188,9 +191,6 @@ class RoutePlanner {
 
     private fun hasRelayFallback(options: ProxyOptions): Boolean =
         options.cfProxyEnabled || options.cfWorkerEnabled
-
-    private val RouteMethod.dialsWsTarget: Boolean
-        get() = this == RouteMethod.WEBSOCKET || this == RouteMethod.FRONTING
 
     private fun clearExpiredCooldowns(now: Long) {
         for (entry in cooldownUntil.entries) {

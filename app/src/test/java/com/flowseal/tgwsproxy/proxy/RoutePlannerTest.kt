@@ -157,12 +157,12 @@ class RoutePlannerTest {
     private val relay = "149.154.167.220"
 
     @Test
-    fun timedOutRelaySkipsWebSocketAndFrontingButNotTcp() {
+    fun timedOutRelaySkipsWebSocketButKeepsFrontingAndTcp() {
         val planner = RoutePlanner()
         planner.markTargetTimedOut(relay)
         val methods = planner.methodsFor(2, false, options(fronting = "example.org"), relay)
         assertFalse(methods.contains(RouteMethod.WEBSOCKET))
-        assertFalse(methods.contains(RouteMethod.FRONTING))
+        assertTrue(methods.contains(RouteMethod.FRONTING))
         assertTrue(methods.contains(RouteMethod.TCP))
         assertTrue(methods.contains(RouteMethod.CLOUDFLARE))
     }
