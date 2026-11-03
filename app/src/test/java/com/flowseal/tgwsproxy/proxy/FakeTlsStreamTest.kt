@@ -1,9 +1,11 @@
 package com.flowseal.tgwsproxy.proxy
 
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.Assert.fail
 
 class FakeTlsStreamTest {
     @Test
@@ -26,6 +28,36 @@ class FakeTlsStreamTest {
         assertEquals(3, input.read(payload))
         assertArrayEquals(byteArrayOf(1, 2, 3), payload)
         assertEquals(-1, input.read())
+    }
+
+    @Test
+    fun zeroLengthWriteDoesNotEmitTlsRecord() {
+        val sink = ByteArrayOutputStream()
+        val output = FakeTlsOutputStream(sink)
+        output.write(byteArrayOf(1, 2, 3), 2, 0)
+        assertEquals(0, sink.size())
+    }
+
+    @Test
+    fun invalidWriteRangeFailsInsteadOfPaddingWithZeros() {
+        val output = FakeTlsOutputStream(ByteArrayOutputStream())
+        try {
+            output.write(byteArrayOf(1, 2), 1, 5)
+            fail("An invalid range must be rejected")
+        } catch (_: IndexOutOfBoundsException) {
+            // Expected: never silently send zero-padded payload bytes.
+        }
+    }
+
+    @Test
+    fun invalidReadRangeFailsBeforeConsumingInput() {
+        val input = FakeTlsInputStream(ByteArrayInputStream(byteArrayOf()))
+        try {
+            input.read(ByteArray(2), 1, 4)
+            fail("An invalid range must be rejected")
+        } catch (_: IndexOutOfBoundsException) {
+            // Expected.
+        }
     }
 
     @Test
