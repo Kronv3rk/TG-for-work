@@ -2,6 +2,17 @@
 
 This Android port tracks the proxy-relevant parts of `Flowseal/tg-ws-proxy`.
 
+## Android 1.9.1 maintenance (2026-11-03)
+
+The Android proxy still tracks the networking design of upstream v1.10.4.
+Upstream v1.11.4 (released 2026-11-01) adds substantial transports and
+routing changes, including HTTP/2; this Android maintenance release does
+**not** claim to port those features.
+
+Android-specific fixes: strict syntax validation of custom IPv6 DC addresses,
+correct Fake TLS stream EOF and zero-length behavior, and linear-time
+encoding of large TLS records. Existing secrets and proxy links are preserved.
+
 ## Synced from TG WS Proxy v1.10.4 (app v1.9.0)
 
 - **WebSocket pool** (`proxy/pool.py` → `WsPool.kt`): pre-opened relay sockets per
