@@ -2,6 +2,7 @@ package com.flowseal.tgwsproxy.proxy
 
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.ByteArrayOutputStream
 import java.io.EOFException
 import java.io.InputStream
 import java.io.OutputStream
@@ -167,20 +168,24 @@ class FakeTls(private val secret: ByteArray, private val maskingDomain: String) 
         )
 
         fun wrapTlsRecords(data: ByteArray): ByteArray {
-            val parts = ArrayList<ByteArray>()
+            // Write directly to one buffer; repeated byte-array concatenation was
+            // quadratic for large media payloads split into many TLS records.
+            val recordCount = (data.size + TLS_APPDATA_MAX - 1) / TLS_APPDATA_MAX
+            val output = ByteArrayOutputStream(data.size + recordCount * 5)
             var offset = 0
             while (offset < data.size) {
                 val length = minOf(TLS_APPDATA_MAX, data.size - offset)
-                parts += byteArrayOf(
+                output.write(byteArrayOf(
                     TLS_RECORD_APPDATA.toByte(),
                     0x03,
                     0x03,
                     ((length shr 8) and 0xFF).toByte(),
                     (length and 0xFF).toByte()
-                ) + data.copyOfRange(offset, offset + length)
+                ))
+                output.write(data, offset, length)
                 offset += length
             }
-            return parts.fold(ByteArray(0)) { acc, part -> acc + part }
+            return output.toByteArray()
         }
 
         private fun hmacSha256(key: ByteArray, data: ByteArray): ByteArray {
@@ -222,6 +227,10 @@ class FakeTlsInputStream(private val raw: InputStream) : InputStream() {
     }
 
     override fun read(target: ByteArray, offset: Int, length: Int): Int {
+        if (offset < 0 || length < 0 || offset > target.size - length) {
+            throw IndexOutOfBoundsException("Invalid output buffer range")
+        }
+        if (length == 0) return 0
         if (bufferOffset >= buffer.size) {
             buffer = readTlsPayload()
             bufferOffset = 0
@@ -247,15 +256,20 @@ class FakeTlsInputStream(private val raw: InputStream) : InputStream() {
         }
 
         while (true) {
-            val header = raw.readExact(5)
-            val type = header[0].toInt() and 0xFF
-            val recordLength = ((header[3].toInt() and 0xFF) shl 8) or (header[4].toInt() and 0xFF)
+            // EOF at a record boundary is normal. A truncated header still
+            // throws EOFException via readExact, preserving corruption signals.
+            val type = raw.read()
+            if (type < 0) return ByteArray(0)
+            val header = raw.readExact(4)
+            val recordLength = ((header[2].toInt() and 0xFF) shl 8) or (header[3].toInt() and 0xFF)
             if (type == 0x14) {
                 if (recordLength > 0) raw.readExact(recordLength)
                 continue
             }
             if (type != 0x17) return ByteArray(0)
-            if (recordLength <= 0 || recordLength > TLS_RECORD_MAX) return ByteArray(0)
+            if (recordLength > TLS_RECORD_MAX) return ByteArray(0)
+            // A legal zero-length application record is not EOF.
+            if (recordLength == 0) continue
             val readLength = minOf(recordLength, BUFFER_SIZE)
             val data = ByteArray(readLength)
             val read = raw.read(data)
@@ -277,6 +291,10 @@ class FakeTlsOutputStream(private val raw: OutputStream) : OutputStream() {
     }
 
     override fun write(data: ByteArray, offset: Int, length: Int) {
+        if (offset < 0 || length < 0 || offset > data.size - length) {
+            throw IndexOutOfBoundsException("Invalid input buffer range")
+        }
+        if (length == 0) return
         raw.write(FakeTls.wrapTlsRecords(data.copyOfRange(offset, offset + length)))
     }
 
