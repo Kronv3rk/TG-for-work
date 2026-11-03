@@ -99,7 +99,22 @@ data class ProxyOptions(
         fun isIpAddress(value: String): Boolean {
             if (value.isBlank()) return false
             if (value.contains(':')) {
-                return value.all { it.isDigit() || it == ':' || it in 'a'..'f' || it in 'A'..'F' }
+                // Do not resolve addresses using DNS: malformed literals must be
+                // rejected before a custom DC override reaches the network layer.
+                val groups = if ("::" in value) {
+                    val halves = value.split("::", limit = 2)
+                    if (halves.size != 2 || "::" in halves[1]) return false
+                    val left = if (halves[0].isEmpty()) emptyList() else halves[0].split(':')
+                    val right = if (halves[1].isEmpty()) emptyList() else halves[1].split(':')
+                    (left + right).takeIf { it.size < 8 } ?: return false
+                } else {
+                    value.split(':').takeIf { it.size == 8 } ?: return false
+                }
+                return groups.all { group ->
+                    group.length in 1..4 && group.all { c ->
+                        c in '0'..'9' || c in 'a'..'f' || c in 'A'..'F'
+                    }
+                }
             }
             val parts = value.split('.')
             if (parts.size != 4) return false
