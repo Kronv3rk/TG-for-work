@@ -120,6 +120,28 @@ class ProxyOptionsTest {
     }
 
     @Test
+    fun malformedIpv6OverridesAreRejected() {
+        val invalid = listOf(
+            ":", ":::", "2001:db8:::1", "1:2:3:4:5:6:7:8:9",
+            "1:2:3:4:5:6:7:", ":1:2:3:4:5:6:7",
+            "2001:db8::1::2", "abcd:efgh::1", "2001:db8::12345"
+        )
+        for (ip in invalid) {
+            assertFalse("Accepted malformed IPv6 literal: $ip", ProxyOptions.isIpAddress(ip))
+            assertNull("Accepted malformed DC override: $ip", ProxyOptions.parseDcIpPair("2:$ip"))
+        }
+    }
+
+    @Test
+    fun validIpv6OverridesRemainSupported() {
+        val valid = listOf("::", "::1", "2001:db8::1", "2001:db8:1:2:3:4:5:6", "fe80::abcd")
+        for (ip in valid) {
+            assertTrue("Rejected valid IPv6 literal: $ip", ProxyOptions.isIpAddress(ip))
+            assertEquals(2 to ip, ProxyOptions.parseDcIpPair("2:$ip"))
+        }
+    }
+
+    @Test
     fun cfWorkerDisabledWhenBlank() {
         val options = ProxyOptions(secretHex = "abc", cfWorkerDomain = "   ")
         assertTrue(options.cfWorkerDomains.isEmpty())
