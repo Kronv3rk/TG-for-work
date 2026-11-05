@@ -349,6 +349,18 @@ class MainActivity : AppCompatActivity() {
                     toastError(R.string.settings_invalid_dcip); return@setOnClickListener
                 }
 
+                val bufferKb = bufferInput.text.toString().trim().toIntOrNull()
+                if (bufferKb == null || bufferKb !in ProxyOptions.MIN_BUFFER_KB..ProxyOptions.MAX_BUFFER_KB) {
+                    toastError(R.string.settings_invalid_buffer)
+                    return@setOnClickListener
+                }
+                val maxConnections = maxConnInput.text.toString().trim().toIntOrNull()
+                if (maxConnections == null ||
+                    maxConnections !in ProxyOptions.MIN_MAX_CONNECTIONS..ProxyOptions.MAX_MAX_CONNECTIONS) {
+                    toastError(R.string.settings_invalid_connections)
+                    return@setOnClickListener
+                }
+
                 val updated = options.copy(
                     host = host,
                     port = port,
@@ -356,10 +368,8 @@ class MainActivity : AppCompatActivity() {
                     cfProxyUserDomain = cfDomain,
                     cfWorkerDomain = worker,
                     dcIpOverrides = dcIps,
-                    bufferKb = bufferInput.text.toString().trim().toIntOrNull()
-                        ?: ProxyOptions.DEFAULT_BUFFER_KB,
-                    maxConnections = maxConnInput.text.toString().trim().toIntOrNull()
-                        ?: ProxyOptions.DEFAULT_MAX_CONNECTIONS,
+                    bufferKb = bufferKb,
+                    maxConnections = maxConnections,
                     fakeTlsDomain = masking,
                     wsPoolEnabled = poolCheck.isChecked,
                     frontingSni = frontingSni
