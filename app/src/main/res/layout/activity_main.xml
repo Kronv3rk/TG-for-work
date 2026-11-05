@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/mainScroll"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/bg_screen"
@@ -10,28 +11,28 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingLeft="18dp"
-        android:paddingTop="20dp"
-        android:paddingRight="18dp"
-        android:paddingBottom="24dp">
+        android:paddingStart="20dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="32dp">
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="54dp"
+            android:layout_height="wrap_content"
             android:gravity="center_vertical"
+            android:minHeight="64dp"
             android:orientation="horizontal">
 
             <ImageView
-                android:layout_width="42dp"
-                android:layout_height="42dp"
-                android:contentDescription="@string/content_app_mark"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:contentDescription="@null"
                 android:src="@drawable/ic_app_mark" />
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginLeft="12dp"
-                android:layout_marginRight="10dp"
+                android:layout_marginStart="12dp"
                 android:layout_weight="1"
                 android:orientation="vertical">
 
@@ -41,33 +42,16 @@
                     android:fontFamily="sans-serif-medium"
                     android:text="@string/home_title"
                     android:textColor="@color/text_primary"
-                    android:textSize="20sp" />
+                    android:textSize="21sp" />
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:maxLines="1"
                     android:text="@string/home_subtitle"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
             </LinearLayout>
-
-            <TextView
-                android:id="@+id/statusBadge"
-                android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:background="@drawable/bg_status_idle"
-                android:drawableStart="@drawable/ic_check"
-                android:drawablePadding="6dp"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center"
-                android:minWidth="96dp"
-                android:paddingLeft="12dp"
-                android:paddingRight="12dp"
-                android:text="@string/proxy_stopped"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
         </LinearLayout>
 
         <LinearLayout
@@ -75,97 +59,113 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:background="@drawable/bg_control_panel"
-            android:elevation="3dp"
             android:orientation="vertical"
-            android:padding="18dp">
+            android:padding="20dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.07"
+                android:text="@string/home_state_overline"
+                android:textColor="@color/text_muted"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/statusBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_status_idle"
+                android:drawableStart="@drawable/ic_check"
+                android:drawablePadding="7dp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center_vertical"
+                android:minHeight="36dp"
+                android:paddingStart="13dp"
+                android:paddingTop="7dp"
+                android:paddingEnd="13dp"
+                android:paddingBottom="7dp"
+                android:text="@string/proxy_stopped"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/heroTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:fontFamily="sans-serif-medium"
+                android:text="@string/home_idle_title"
+                android:textColor="@color/text_primary"
+                android:textSize="26sp" />
+
+            <TextView
+                android:id="@+id/heroBody"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="7dp"
+                android:lineSpacingExtra="3dp"
+                android:text="@string/home_idle_body"
+                android:textColor="@color/text_secondary"
+                android:textSize="15sp" />
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="17dp"
+                android:background="@drawable/bg_route_badge"
                 android:gravity="center_vertical"
-                android:orientation="horizontal">
+                android:minHeight="52dp"
+                android:orientation="horizontal"
+                android:paddingStart="14dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="14dp"
+                android:paddingBottom="10dp">
 
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginRight="12dp"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
                     <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="30dp"
-                        android:background="@drawable/bg_chip"
-                        android:fontFamily="sans-serif-medium"
-                        android:gravity="center"
-                        android:paddingLeft="12dp"
-                        android:paddingRight="12dp"
-                        android:text="@string/hero_label"
-                        android:textColor="@color/brand_dark"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/home_endpoint_label"
+                        android:textColor="@color/text_muted"
                         android:textSize="12sp" />
 
                     <TextView
+                        android:id="@+id/endpointValue"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:fontFamily="sans-serif-medium"
-                        android:text="@string/hero_title"
+                        android:layout_marginTop="3dp"
+                        android:fontFamily="monospace"
+                        android:text="@string/home_endpoint_placeholder"
                         android:textColor="@color/text_primary"
-                        android:textSize="26sp" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:lineSpacingExtra="2dp"
-                        android:text="@string/hero_body"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="14sp" />
+                        android:textSize="15sp" />
                 </LinearLayout>
 
                 <ImageView
-                    android:layout_width="104dp"
-                    android:layout_height="104dp"
-                    android:contentDescription="@string/content_security_illustration"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/illustration_route_control" />
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_marginStart="10dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_lock" />
             </LinearLayout>
-
-            <TextView
-                android:id="@+id/routeStatusValue"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:background="@drawable/bg_route_badge"
-                android:drawableStart="@drawable/ic_route"
-                android:drawablePadding="8dp"
-                android:fontFamily="sans-serif-medium"
-                android:gravity="center_vertical"
-                android:lineSpacingExtra="2dp"
-                android:minHeight="44dp"
-                android:paddingLeft="14dp"
-                android:paddingTop="11dp"
-                android:paddingRight="14dp"
-                android:paddingBottom="11dp"
-                android:text="@string/route_status_empty"
-                android:textColor="@color/text_primary"
-                android:textSize="14sp" />
 
             <TextView
                 android:id="@+id/backgroundWarning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="12dp"
                 android:background="@drawable/bg_status_idle"
                 android:drawableStart="@drawable/ic_power"
                 android:drawablePadding="8dp"
                 android:gravity="center_vertical"
-                android:lineSpacingExtra="2dp"
                 android:minHeight="48dp"
-                android:paddingLeft="14dp"
-                android:paddingTop="10dp"
-                android:paddingRight="14dp"
-                android:paddingBottom="10dp"
+                android:padding="13dp"
                 android:text="@string/background_warning"
                 android:textColor="@color/text_primary"
                 android:textSize="13sp"
@@ -174,14 +174,16 @@
             <Button
                 android:id="@+id/connectButton"
                 android:layout_width="match_parent"
-                android:layout_height="54dp"
-                android:layout_marginTop="16dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
                 android:background="@drawable/bg_primary_button"
                 android:drawableStart="@drawable/ic_power"
-                android:drawablePadding="8dp"
+                android:drawablePadding="9dp"
                 android:fontFamily="sans-serif-medium"
                 android:gravity="center"
-                android:minHeight="54dp"
+                android:minHeight="56dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
                 android:text="@string/primary_action"
                 android:textAllCaps="false"
                 android:textColor="@color/white"
@@ -197,15 +199,15 @@
                 <Button
                     android:id="@+id/checkConnectionButton"
                     android:layout_width="0dp"
-                    android:layout_height="50dp"
-                    android:layout_marginRight="5dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
                     android:layout_weight="1"
                     android:background="@drawable/bg_secondary_button"
-                    android:drawableStart="@drawable/ic_speed"
-                    android:drawablePadding="7dp"
                     android:fontFamily="sans-serif-medium"
                     android:gravity="center"
-                    android:minHeight="50dp"
+                    android:minHeight="52dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
                     android:text="@string/secondary_action"
                     android:textAllCaps="false"
                     android:textColor="@color/brand_dark"
@@ -214,15 +216,15 @@
                 <Button
                     android:id="@+id/stopButton"
                     android:layout_width="0dp"
-                    android:layout_height="50dp"
-                    android:layout_marginLeft="5dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
                     android:layout_weight="1"
                     android:background="@drawable/bg_success_button"
-                    android:drawableStart="@drawable/ic_power"
-                    android:drawablePadding="7dp"
                     android:fontFamily="sans-serif-medium"
                     android:gravity="center"
-                    android:minHeight="50dp"
+                    android:minHeight="52dp"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
                     android:text="@string/primary_action_start"
                     android:textAllCaps="false"
                     android:textColor="@color/white"
@@ -230,106 +232,86 @@
             </LinearLayout>
         </LinearLayout>
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:fontFamily="sans-serif-medium"
+            android:text="@string/metrics_title"
+            android:textColor="@color/text_primary"
+            android:textSize="18sp" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="12dp"
             android:baselineAligned="false"
             android:orientation="horizontal">
 
             <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="82dp"
-                android:layout_marginRight="6dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
                 android:layout_weight="1"
                 android:background="@drawable/bg_metric_card"
-                android:gravity="center_vertical"
+                android:minHeight="98dp"
                 android:orientation="vertical"
-                android:padding="12dp">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/metric_latency_label"
-                    android:textColor="@color/text_muted"
-                    android:textSize="12sp" />
-
-                <TextView
-                    android:id="@+id/routeValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:fontFamily="sans-serif-medium"
-                    android:text="@string/metric_latency_value"
-                    android:textColor="@color/text_primary"
-                    android:textSize="18sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="82dp"
-                android:layout_marginLeft="3dp"
-                android:layout_marginRight="3dp"
-                android:layout_weight="1"
-                android:background="@drawable/bg_metric_card"
-                android:gravity="center_vertical"
-                android:orientation="vertical"
-                android:padding="12dp">
+                android:padding="16dp">
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/metric_sessions_label"
                     android:textColor="@color/text_muted"
-                    android:textSize="12sp" />
+                    android:textSize="13sp" />
 
                 <TextView
                     android:id="@+id/sessionsValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
+                    android:layout_marginTop="8dp"
                     android:fontFamily="sans-serif-medium"
                     android:text="@string/metric_sessions_value"
                     android:textColor="@color/text_primary"
-                    android:textSize="18sp" />
+                    android:textSize="23sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="82dp"
-                android:layout_marginLeft="6dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
                 android:layout_weight="1"
                 android:background="@drawable/bg_metric_card"
-                android:gravity="center_vertical"
+                android:minHeight="98dp"
                 android:orientation="vertical"
-                android:padding="12dp">
+                android:padding="16dp">
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/metric_protection_label"
                     android:textColor="@color/text_muted"
-                    android:textSize="12sp" />
+                    android:textSize="13sp" />
 
                 <TextView
                     android:id="@+id/trafficValue"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
+                    android:layout_marginTop="8dp"
                     android:fontFamily="sans-serif-medium"
                     android:text="@string/metric_protection_value"
                     android:textColor="@color/accent_dark"
-                    android:textSize="18sp" />
+                    android:textSize="23sp" />
             </LinearLayout>
         </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="16dp"
             android:background="@drawable/bg_panel_tint"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:padding="18dp">
 
             <TextView
                 android:layout_width="match_parent"
@@ -337,23 +319,59 @@
                 android:fontFamily="sans-serif-medium"
                 android:text="@string/route_panel_title"
                 android:textColor="@color/text_primary"
-                android:textSize="17sp" />
+                android:textSize="18sp" />
+
+            <TextView
+                android:id="@+id/routeStatusValue"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:drawableStart="@drawable/ic_route"
+                android:drawablePadding="8dp"
+                android:text="@string/route_status_empty"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp" />
 
             <TextView
                 android:id="@+id/routePolicyValue"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:lineSpacingExtra="2dp"
                 android:text="@string/route_policy_empty"
                 android:textColor="@color/text_secondary"
                 android:textSize="14sp" />
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="12dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
                 android:gravity="center_vertical"
+                android:minHeight="42dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/metric_latency_label"
+                    android:textColor="@color/text_muted"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/routeValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="@string/metric_latency_value"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:minHeight="42dp"
                 android:orientation="horizontal">
 
                 <TextView
@@ -362,7 +380,7 @@
                     android:layout_weight="1"
                     android:text="@string/network_label"
                     android:textColor="@color/text_muted"
-                    android:textSize="13sp" />
+                    android:textSize="14sp" />
 
                 <TextView
                     android:id="@+id/networkValue"
@@ -371,13 +389,14 @@
                     android:fontFamily="sans-serif-medium"
                     android:text="@string/network_unknown"
                     android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
+                    android:textSize="14sp" />
             </LinearLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
+                android:layout_height="wrap_content"
                 android:gravity="center_vertical"
+                android:minHeight="42dp"
                 android:orientation="horizontal">
 
                 <TextView
@@ -386,7 +405,7 @@
                     android:layout_weight="1"
                     android:text="@string/link_mode_label"
                     android:textColor="@color/text_muted"
-                    android:textSize="13sp" />
+                    android:textSize="14sp" />
 
                 <TextView
                     android:id="@+id/linkModeValue"
@@ -395,60 +414,71 @@
                     android:fontFamily="sans-serif-medium"
                     android:text="@string/link_mode_fake_tls"
                     android:textColor="@color/text_primary"
-                    android:textSize="13sp" />
+                    android:textSize="14sp" />
             </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:background="@color/stroke" />
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
+                android:layout_height="wrap_content"
                 android:gravity="center_vertical"
+                android:minHeight="56dp"
                 android:orientation="horizontal">
 
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:labelFor="@id/fakeTlsSwitch"
                     android:text="@string/fake_tls_toggle"
                     android:textColor="@color/text_primary"
-                    android:textSize="14sp" />
+                    android:textSize="15sp" />
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/fakeTlsSwitch"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:minWidth="48dp"
+                    android:contentDescription="@string/fake_tls_toggle"
                     android:minHeight="48dp"
-                    android:contentDescription="@string/fake_tls_toggle" />
+                    android:minWidth="48dp" />
             </LinearLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="48dp"
+                android:layout_height="wrap_content"
                 android:gravity="center_vertical"
+                android:minHeight="56dp"
                 android:orientation="horizontal">
 
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:labelFor="@id/cfProxySwitch"
                     android:text="@string/cfproxy_toggle"
                     android:textColor="@color/text_primary"
-                    android:textSize="14sp" />
+                    android:textSize="15sp" />
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/cfProxySwitch"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:minWidth="48dp"
+                    android:contentDescription="@string/cfproxy_toggle"
                     android:minHeight="48dp"
-                    android:contentDescription="@string/cfproxy_toggle" />
+                    android:minWidth="48dp" />
             </LinearLayout>
         </LinearLayout>
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
+            android:layout_marginTop="26dp"
             android:fontFamily="sans-serif-medium"
             android:text="@string/quick_title"
             android:textColor="@color/text_primary"
@@ -460,30 +490,17 @@
             android:layout_marginTop="12dp"
             android:orientation="vertical">
 
-            <include
-                android:id="@+id/proxyRow"
-                layout="@layout/item_proxy" />
-
-            <include
-                android:id="@+id/securityRow"
-                layout="@layout/item_security" />
-
-            <include
-                android:id="@+id/routeRow"
-                layout="@layout/item_route" />
-
-            <include
-                android:id="@+id/profileRow"
-                layout="@layout/item_profile" />
+            <include android:id="@+id/proxyRow" layout="@layout/item_proxy" />
+            <include android:id="@+id/profileRow" layout="@layout/item_profile" />
         </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
+            android:layout_marginTop="18dp"
             android:background="@drawable/bg_panel"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:padding="18dp">
 
             <TextView
                 android:layout_width="match_parent"
@@ -491,13 +508,13 @@
                 android:fontFamily="sans-serif-medium"
                 android:text="@string/footer_title"
                 android:textColor="@color/text_primary"
-                android:textSize="16sp" />
+                android:textSize="18sp" />
 
             <TextView
                 android:id="@+id/footerBody"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="8dp"
                 android:lineSpacingExtra="2dp"
                 android:text="@string/footer_body"
                 android:textColor="@color/text_secondary"
@@ -508,71 +525,87 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:fontFamily="sans-serif-medium"
                 android:text="@string/route_health_empty"
-                android:textColor="@color/text_primary"
+                android:textColor="@color/text_secondary"
                 android:textSize="13sp" />
 
-            <TextView
-                android:id="@+id/connectionLogValue"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/bg_chip"
-                android:fontFamily="monospace"
-                android:lineSpacingExtra="3dp"
-                android:minHeight="48dp"
-                android:padding="10dp"
-                android:text="@string/log_empty"
-                android:textColor="@color/text_secondary"
-                android:textSize="11sp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="@string/log_hint"
-                android:textColor="@color/text_muted"
-                android:textSize="11sp" />
-
-            <LinearLayout
+            <Button
+                android:id="@+id/detailsToggleButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:baselineAligned="false"
-                android:orientation="horizontal">
+                android:background="@drawable/bg_secondary_button"
+                android:fontFamily="sans-serif-medium"
+                android:minHeight="50dp"
+                android:text="@string/show_diagnostics"
+                android:textAllCaps="false"
+                android:textColor="@color/brand_dark"
+                android:textSize="14sp" />
 
-                <Button
-                    android:id="@+id/settingsButton"
-                    android:layout_width="0dp"
-                    android:layout_height="48dp"
-                    android:layout_marginRight="6dp"
-                    android:layout_weight="1"
-                    android:background="@drawable/bg_secondary_button"
-                    android:drawableStart="@drawable/ic_settings"
-                    android:drawablePadding="7dp"
-                    android:fontFamily="sans-serif-medium"
-                    android:gravity="center"
-                    android:text="@string/settings_action"
-                    android:textAllCaps="false"
-                    android:textColor="@color/brand_dark"
-                    android:textSize="14sp" />
+            <LinearLayout
+                android:id="@+id/diagnosticsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical"
+                android:visibility="gone">
 
-                <Button
-                    android:id="@+id/logsButton"
-                    android:layout_width="0dp"
-                    android:layout_height="48dp"
-                    android:layout_marginLeft="6dp"
-                    android:layout_weight="1"
-                    android:background="@drawable/bg_secondary_button"
-                    android:drawableStart="@drawable/ic_list"
-                    android:drawablePadding="7dp"
-                    android:fontFamily="sans-serif-medium"
-                    android:gravity="center"
-                    android:text="@string/logs_action"
-                    android:textAllCaps="false"
-                    android:textColor="@color/brand_dark"
-                    android:textSize="14sp" />
+                <TextView
+                    android:id="@+id/connectionLogValue"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_route_badge"
+                    android:fontFamily="monospace"
+                    android:lineSpacingExtra="3dp"
+                    android:minHeight="48dp"
+                    android:padding="12dp"
+                    android:text="@string/log_empty"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/log_hint"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/settingsButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_secondary_button"
+                        android:fontFamily="sans-serif-medium"
+                        android:minHeight="50dp"
+                        android:text="@string/settings_action"
+                        android:textAllCaps="false"
+                        android:textColor="@color/brand_dark"
+                        android:textSize="14sp" />
+
+                    <Button
+                        android:id="@+id/logsButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_secondary_button"
+                        android:fontFamily="sans-serif-medium"
+                        android:minHeight="50dp"
+                        android:text="@string/logs_action"
+                        android:textAllCaps="false"
+                        android:textColor="@color/brand_dark"
+                        android:textSize="14sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <TextView
@@ -583,7 +616,7 @@
                 android:gravity="center"
                 android:text="@string/build_info_placeholder"
                 android:textColor="@color/text_muted"
-                android:textSize="11sp" />
+                android:textSize="12sp" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>
