@@ -138,4 +138,5 @@
     <string name="settings_hide_secret">Скрыть</string>
     <string name="settings_invalid_buffer">Размер буфера должен быть от 16 до 1024 КБ.</string>
     <string name="settings_invalid_connections">Максимальное количество соединений должно быть от 16 до 512.</string>
+    <string name="settings_invalid_cfdomain">Некорректный домен Cloudflare.</string>
 </resources>
