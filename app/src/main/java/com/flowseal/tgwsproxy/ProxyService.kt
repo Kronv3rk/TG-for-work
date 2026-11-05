@@ -35,6 +35,15 @@ class ProxyService : Service() {
         // Before the user unlocks the device after a reboot the settings store is
         // unreadable, so starting here would refuse to run rather than mint a new
         // identity. Stay alive and let a later start command bring the proxy up.
+        // Stop must work even while credential-protected settings are locked.
+        // Otherwise a user-issued STOP can be ignored before dispatch.
+        if (intent?.action == ACTION_STOP) {
+            ProxyRuntime.stop()
+            ProxyKeepAlive.release()
+            stopForegroundCompat()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (!canStartProxy()) return START_STICKY
         when (intent?.action ?: ACTION_START) {
             ACTION_OPEN_TELEGRAM -> {
@@ -50,13 +59,6 @@ class ProxyService : Service() {
             ACTION_RESTART -> {
                 ProxyRuntime.restart(this)
                 startForegroundCompat()
-            }
-            ACTION_STOP -> {
-                ProxyRuntime.stop()
-                ProxyKeepAlive.release()
-                stopForegroundCompat()
-                stopSelf()
-                return START_NOT_STICKY
             }
             else -> {
                 ProxyRuntime.start(this)
