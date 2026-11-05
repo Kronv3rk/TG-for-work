@@ -91,6 +91,18 @@ class RoutePlanner {
         targetBlockedUntil.clear()
     }
 
+    /**
+     * All old path measurements refer to the previous default network.
+     * Do not let one mobile provider's failures bias the next Wi-Fi connection.
+     */
+    fun resetNetworkState() {
+        targetBlockedUntil.clear()
+        cooldownUntil.clear()
+        lastFailureAt.clear()
+        health.clear()
+        lastStatus.set("Сеть изменилась, выбираем новый маршрут")
+    }
+
     fun policyLabel(options: ProxyOptions): String {
         val core = when {
             options.cellularNetwork && options.cfProxyEnabled -> "Авто: мобильная сеть, CF > WS > TCP"
