@@ -123,6 +123,7 @@
     <string name="home_clients_body">Telegram обращается к локальному прокси. Состояние внешних маршрутов указано ниже.</string>
     <string name="home_endpoint_label">Локальный адрес</string>
     <string name="home_endpoint_placeholder">127.0.0.1:1443</string>
+    <string name="home_endpoint_value">%1$s:%2$d</string>
     <string name="home_connect_and_open">Запустить и открыть Telegram</string>
     <string name="proxy_has_clients">Есть подключения</string>
     <string name="show_diagnostics">Показать журнал</string>
