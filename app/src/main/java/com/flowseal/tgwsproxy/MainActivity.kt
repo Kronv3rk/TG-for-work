@@ -297,11 +297,17 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.settings_secret_copied, Toast.LENGTH_SHORT).show()
         }
 
-        AlertDialog.Builder(this)
+        // AlertDialog's default positive-button callback always dismisses the
+        // dialog, even after validation fails. Handle the click ourselves so the
+        // user can correct an invalid field without losing all entered settings.
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.settings_dialog_title)
             .setView(view)
             .setNegativeButton(R.string.settings_cancel, null)
-            .setPositiveButton(R.string.settings_save) { _, _ ->
+            .setPositiveButton(R.string.settings_save, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
                 val worker = workerInput.text.toString().trim()
                 val masking = maskingInput.text.toString().trim()
                 val secret = secretInput.text.toString().trim().lowercase()
@@ -312,35 +318,35 @@ class MainActivity : AppCompatActivity() {
                 val frontingSni = frontingInput.text.toString().trim().lowercase()
 
                 if (secret.isNotEmpty() && !ProxyRuntime.isValidSecret(secret)) {
-                    toastError(R.string.settings_invalid_secret); return@setPositiveButton
+                    toastError(R.string.settings_invalid_secret); return@setOnClickListener
                 }
                 if (worker.split(separators).filter { it.isNotEmpty() }
                         .any { CfProxyBalancer.normalizeDomain(it) == null }
                 ) {
-                    toastError(R.string.settings_invalid_worker); return@setPositiveButton
+                    toastError(R.string.settings_invalid_worker); return@setOnClickListener
                 }
                 if (masking.isNotEmpty() && CfProxyBalancer.normalizeDomain(masking) == null) {
-                    toastError(R.string.settings_invalid_masking); return@setPositiveButton
+                    toastError(R.string.settings_invalid_masking); return@setOnClickListener
                 }
                 if (cfDomain.isNotEmpty() && CfProxyBalancer.normalizeDomain(cfDomain) == null) {
-                    toastError(R.string.settings_invalid_masking); return@setPositiveButton
+                    toastError(R.string.settings_invalid_masking); return@setOnClickListener
                 }
                 if (frontingSni.isNotEmpty() && CfProxyBalancer.normalizeDomain(frontingSni) == null) {
-                    toastError(R.string.settings_invalid_fronting); return@setPositiveButton
+                    toastError(R.string.settings_invalid_fronting); return@setOnClickListener
                 }
                 if (!isValidHost(host)) {
-                    toastError(R.string.settings_invalid_host); return@setPositiveButton
+                    toastError(R.string.settings_invalid_host); return@setOnClickListener
                 }
                 val port = portText.toIntOrNull()
                 if (port == null || port !in 1..65535) {
-                    toastError(R.string.settings_invalid_port); return@setPositiveButton
+                    toastError(R.string.settings_invalid_port); return@setOnClickListener
                 }
                 // Every non-empty DC:IP token must parse, otherwise a typo would be
                 // silently dropped and the user would think the override is active.
                 if (dcIps.split(separators).filter { it.isNotEmpty() }
                         .any { ProxyOptions.parseDcIpPair(it) == null }
                 ) {
-                    toastError(R.string.settings_invalid_dcip); return@setPositiveButton
+                    toastError(R.string.settings_invalid_dcip); return@setOnClickListener
                 }
 
                 val updated = options.copy(
@@ -375,9 +381,11 @@ class MainActivity : AppCompatActivity() {
                 if (ProxyRuntime.isRunning()) ProxyService.start(this)
                 renderState(ProxyRuntime.snapshot(this))
                 Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
                 if (linkChanged) promptReconnectTelegram()
             }
-            .show()
+        }
+        dialog.show()
     }
 
     /**
