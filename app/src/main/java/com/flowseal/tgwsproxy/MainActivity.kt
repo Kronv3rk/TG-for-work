@@ -157,9 +157,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        copyButton.setOnClickListener {
-            copyProxyLink()
-        }
+        // The proxy link is copied from the dedicated quick-action row.
+        // This button belongs to Diagnostics and therefore copies the log.
+        copyButton.setOnClickListener { copyDiagnosticLog() }
 
         restartButton.setOnClickListener {
             restartProxy()
@@ -172,14 +172,20 @@ class MainActivity : AppCompatActivity() {
         backgroundWarning.setOnClickListener { requestIgnoreBatteryOptimizations() }
 
         connectionLogValue.setOnLongClickListener {
-            val log = ConnectionLog.fullText(censored = true)
-            if (log.isNotBlank()) {
-                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("TG for Work log", log))
-                Toast.makeText(this, R.string.log_copied, Toast.LENGTH_SHORT).show()
-            }
+            copyDiagnosticLog()
             true
         }
+    }
+
+    private fun copyDiagnosticLog() {
+        val log = ConnectionLog.fullText(censored = true)
+        if (log.isBlank()) {
+            Toast.makeText(this, R.string.log_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("TG for Work log", log))
+        Toast.makeText(this, R.string.log_copied, Toast.LENGTH_SHORT).show()
     }
 
     private fun showEndpoint(options: ProxyOptions) {
