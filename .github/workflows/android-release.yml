@@ -200,7 +200,7 @@ jobs:
             echo "::error::Release signing certificate does not match v1.9.0. Existing users cannot update." >&2
             exit 1
           fi
-          sha256sum "$APK" > "$APK.sha256"
+          (cd "$RUNNER_TEMP" && sha256sum "$(basename "$APK")") > "$APK.sha256"
           echo "APK signature verified and compatible with v1.9.0"
 
       - name: Upload workflow artifact
