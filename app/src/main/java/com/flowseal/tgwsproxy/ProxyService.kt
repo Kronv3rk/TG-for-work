@@ -142,19 +142,20 @@ class ProxyService : Service() {
         val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-                if (!networkMonitoring || !ProxyRuntime.isRunning()) return
-                val wifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-                val cellular = !wifi && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-                val handover = networkTracker.changed(network.toString(), cellular, wifi)
-                ProxyRuntime.onDefaultNetworkChanged(cellular, forceReset = handover)
-                ProxyKeepAlive.setWifiActive(this@ProxyService, wifi)
+                // API 24-25 dispatch callbacks on the connectivity thread. Android
+                // 26+ uses our Handler, supplied at registration below.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                    networkHandler.post { handleNetworkCapabilities(this, network, capabilities) }
+                } else {
+                    handleNetworkCapabilities(this, network, capabilities)
+                }
             }
 
             override fun onLost(network: Network) {
-                if (!networkMonitoring || !ProxyRuntime.isRunning()) return
-                if (networkTracker.lost(network.toString())) {
-                    ProxyRuntime.onDefaultNetworkLost()
-                    ProxyKeepAlive.setWifiActive(this@ProxyService, false)
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                    networkHandler.post { handleNetworkLost(this, network) }
+                } else {
+                    handleNetworkLost(this, network)
                 }
             }
         }
@@ -173,6 +174,27 @@ class ProxyService : Service() {
             networkCallback = null
             networkManager = null
             ConnectionLog.info("Не удалось отслеживать смену сети")
+        }
+    }
+
+    private fun handleNetworkCapabilities(
+        callback: ConnectivityManager.NetworkCallback,
+        network: Network,
+        capabilities: NetworkCapabilities
+    ) {
+        if (!networkMonitoring || networkCallback !== callback || !ProxyRuntime.isRunning()) return
+        val wifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        val cellular = !wifi && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+        val handover = networkTracker.changed(network.toString(), cellular, wifi)
+        ProxyRuntime.onDefaultNetworkChanged(cellular, forceReset = handover)
+        ProxyKeepAlive.setWifiActive(this, wifi)
+    }
+
+    private fun handleNetworkLost(callback: ConnectivityManager.NetworkCallback, network: Network) {
+        if (!networkMonitoring || networkCallback !== callback || !ProxyRuntime.isRunning()) return
+        if (networkTracker.lost(network.toString())) {
+            ProxyRuntime.onDefaultNetworkLost()
+            ProxyKeepAlive.setWifiActive(this, false)
         }
     }
 
