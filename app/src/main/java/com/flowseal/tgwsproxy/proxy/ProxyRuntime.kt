@@ -86,6 +86,18 @@ object ProxyRuntime {
 
     fun isRunning(): Boolean = proxy?.isRunning == true
 
+    /** Network callbacks update only the running instance; they must never start a
+     * stopped proxy, rotate its secret, or read credential-protected storage. */
+    @Synchronized
+    fun onDefaultNetworkChanged(cellular: Boolean, forceReset: Boolean) {
+        proxy?.takeIf { it.isRunning }?.onDefaultNetworkChanged(cellular, forceReset)
+    }
+
+    @Synchronized
+    fun onDefaultNetworkLost() {
+        proxy?.takeIf { it.isRunning }?.onDefaultNetworkLost()
+    }
+
     fun currentLink(context: Context): String = start(context).proxyLink
 
     fun setFakeTlsEnabled(context: Context, enabled: Boolean) {
