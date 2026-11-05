@@ -388,47 +388,45 @@ class MainActivity : AppCompatActivity() {
                 val frontingSni = frontingInput.text.toString().trim().lowercase()
 
                 if (secret.isNotEmpty() && !ProxyRuntime.isValidSecret(secret)) {
-                    toastError(R.string.settings_invalid_secret); return@setOnClickListener
+                    fieldError(secretInput, R.string.settings_invalid_secret); return@setOnClickListener
                 }
                 if (worker.split(separators).filter { it.isNotEmpty() }
                         .any { CfProxyBalancer.normalizeDomain(it) == null }
                 ) {
-                    toastError(R.string.settings_invalid_worker); return@setOnClickListener
+                    fieldError(workerInput, R.string.settings_invalid_worker); return@setOnClickListener
                 }
                 if (masking.isNotEmpty() && CfProxyBalancer.normalizeDomain(masking) == null) {
-                    toastError(R.string.settings_invalid_masking); return@setOnClickListener
+                    fieldError(maskingInput, R.string.settings_invalid_masking); return@setOnClickListener
                 }
                 if (cfDomain.isNotEmpty() && CfProxyBalancer.normalizeDomain(cfDomain) == null) {
-                    toastError(R.string.settings_invalid_masking); return@setOnClickListener
+                    fieldError(cfDomainInput, R.string.settings_invalid_masking); return@setOnClickListener
                 }
                 if (frontingSni.isNotEmpty() && CfProxyBalancer.normalizeDomain(frontingSni) == null) {
-                    toastError(R.string.settings_invalid_fronting); return@setOnClickListener
+                    fieldError(frontingInput, R.string.settings_invalid_fronting); return@setOnClickListener
                 }
                 if (!isValidHost(host)) {
-                    toastError(R.string.settings_invalid_host); return@setOnClickListener
+                    fieldError(hostInput, R.string.settings_invalid_host); return@setOnClickListener
                 }
                 val port = portText.toIntOrNull()
                 if (port == null || port !in 1..65535) {
-                    toastError(R.string.settings_invalid_port); return@setOnClickListener
+                    fieldError(portInput, R.string.settings_invalid_port); return@setOnClickListener
                 }
                 // Every non-empty DC:IP token must parse, otherwise a typo would be
                 // silently dropped and the user would think the override is active.
                 if (dcIps.split(separators).filter { it.isNotEmpty() }
                         .any { ProxyOptions.parseDcIpPair(it) == null }
                 ) {
-                    toastError(R.string.settings_invalid_dcip); return@setOnClickListener
+                    fieldError(dcIpInput, R.string.settings_invalid_dcip); return@setOnClickListener
                 }
 
                 val bufferKb = bufferInput.text.toString().trim().toIntOrNull()
                 if (bufferKb == null || bufferKb !in ProxyOptions.MIN_BUFFER_KB..ProxyOptions.MAX_BUFFER_KB) {
-                    toastError(R.string.settings_invalid_buffer)
-                    bufferInput.requestFocus()
+                    fieldError(bufferInput, R.string.settings_invalid_buffer)
                     return@setOnClickListener
                 }
                 val maxConnections = maxConnInput.text.toString().trim().toIntOrNull()
                 if (maxConnections == null || maxConnections !in ProxyOptions.MIN_MAX_CONNECTIONS..ProxyOptions.MAX_MAX_CONNECTIONS) {
-                    toastError(R.string.settings_invalid_connections)
-                    maxConnInput.requestFocus()
+                    fieldError(maxConnInput, R.string.settings_invalid_connections)
                     return@setOnClickListener
                 }
 
@@ -488,8 +486,9 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun toastError(messageId: Int) {
-        Toast.makeText(this, messageId, Toast.LENGTH_LONG).show()
+    private fun fieldError(field: EditText, messageId: Int) {
+        field.error = getString(messageId)
+        field.requestFocus()
     }
 
     /** The local listen address: an IP literal, "localhost" or a plain hostname. */
