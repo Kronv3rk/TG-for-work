@@ -201,6 +201,25 @@ class RoutePlannerTest {
     }
 
     @Test
+    fun switchingNetworksResetsOldCooldownsAndTransportHealth() {
+        val planner = RoutePlanner()
+        planner.markConnected(RouteMethod.WEBSOCKET, 2, false, 100)
+        planner.markFailed(RouteMethod.CLOUDFLARE, 2, false)
+        planner.markTargetTimedOut(relay)
+        assertTrue(planner.isTargetBlocked(relay))
+        assertFalse(planner.healthSummary().contains("WS —"))
+
+        planner.resetNetworkState()
+
+        assertFalse(planner.isTargetBlocked(relay))
+        assertTrue(planner.healthSummary().contains("WS —"))
+        assertEquals(
+            listOf(RouteMethod.CLOUDFLARE, RouteMethod.WEBSOCKET, RouteMethod.TCP),
+            planner.methodsFor(2, true, options(cf = true, cfPriority = true))
+        )
+    }
+
+    @Test
     fun frontingFollowsWebSocketWhenConfigured() {
         val planner = RoutePlanner()
         val methods = planner.methodsFor(2, false, options(cf = false, fronting = "example.org"))
