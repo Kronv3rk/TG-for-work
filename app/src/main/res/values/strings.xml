@@ -97,6 +97,8 @@
     <string name="settings_maxconn_label">Максимум соединений (16–512)</string>
     <string name="settings_maxconn_hint">96</string>
     <string name="settings_invalid_host">Некорректный локальный адрес</string>
+    <string name="settings_invalid_buffer">Размер буфера должен быть от 16 до 1024 КБ</string>
+    <string name="settings_invalid_connections">Максимальное количество соединений должно быть от 16 до 512</string>
     <string name="settings_invalid_port">Порт должен быть числом от 1 до 65535</string>
     <string name="settings_invalid_dcip">Некорректная пара DC:IP</string>
     <string name="settings_pool_label">Держать WebSocket-соединения наготове (только Wi-Fi)</string>
