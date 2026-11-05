@@ -97,14 +97,25 @@ class TelegramProxy(
      * The network type changed but the endpoint did not. Update it in place so route
      * ordering follows the new network without restarting the proxy.
      */
-    fun updateNetwork(newOptions: ProxyOptions) {
-        val changed = newOptions.cellularNetwork != networkOptions.cellularNetwork
+    fun updateNetwork(newOptions: ProxyOptions, forceReset: Boolean = false) {
+        val changed = forceReset || newOptions.cellularNetwork != networkOptions.cellularNetwork
         networkOptions = newOptions
-        if (changed) {
-            // Blocks and pooled sockets belong to the old network.
-            routePlanner.resetTargetCooldowns()
-            wsPool.clear()
-        }
+        if (changed) invalidateNetworkRoutes()
+    }
+
+    /** Called on default-network changes without restarting the local MTProto listener. */
+    fun onDefaultNetworkChanged(cellular: Boolean, forceReset: Boolean) {
+        updateNetwork(networkOptions.copy(cellularNetwork = cellular), forceReset)
+    }
+
+    /** Force Telegram to reconnect instead of waiting for an old dead mobile socket. */
+    fun onDefaultNetworkLost() = invalidateNetworkRoutes()
+
+    private fun invalidateNetworkRoutes() {
+        routePlanner.resetNetworkState()
+        wsPool.clear()
+        for (client in clients) runCatching { client.close() }
+        ConnectionLog.info("Сеть изменилась: старые подключения закрыты, маршруты пересоздаются")
     }
 
     fun start() {
