@@ -136,4 +136,6 @@
     <string name="settings_secret_hint">Секрет подключения</string>
     <string name="settings_show_secret">Показать</string>
     <string name="settings_hide_secret">Скрыть</string>
+    <string name="settings_invalid_buffer">Размер буфера должен быть от 16 до 1024 КБ.</string>
+    <string name="settings_invalid_connections">Максимальное количество соединений должно быть от 16 до 512.</string>
 </resources>
