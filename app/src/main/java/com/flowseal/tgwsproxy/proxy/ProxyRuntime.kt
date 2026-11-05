@@ -86,7 +86,10 @@ object ProxyRuntime {
 
     fun isRunning(): Boolean = proxy?.isRunning == true
 
-    fun currentLink(context: Context): String = start(context).proxyLink
+    /** Link generation must not start a listening socket or foreground service. */
+    fun currentLink(context: Context): String =
+        proxy?.takeIf { it.isRunning }?.proxyLink
+            ?: ProxyLinkFormatter.link(loadOptions(context.applicationContext))
 
     fun setFakeTlsEnabled(context: Context, enabled: Boolean) {
         val value = if (enabled) ProxyOptions.DEFAULT_FAKE_TLS_DOMAIN else ""
