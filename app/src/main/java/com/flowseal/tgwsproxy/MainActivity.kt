@@ -539,6 +539,9 @@ class MainActivity : AppCompatActivity() {
         statusBadge.setTextColor(badgeColor)
         statusBadge.compoundDrawables.forEach { it?.setTint(badgeColor) }
         connectButton.setText(if (stats.running) R.string.primary_action else R.string.home_connect_and_open)
+        checkConnectionButton.setText(
+            if (stats.running) R.string.proxy_already_running else R.string.secondary_action
+        )
         checkConnectionButton.isEnabled = !stats.running
         checkConnectionButton.alpha = if (stats.running) 0.60f else 1.0f
         routeValue.text = routeLabel(stats)
