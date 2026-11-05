@@ -399,7 +399,7 @@ class MainActivity : AppCompatActivity() {
                     fieldError(maskingInput, R.string.settings_invalid_masking); return@setOnClickListener
                 }
                 if (cfDomain.isNotEmpty() && CfProxyBalancer.normalizeDomain(cfDomain) == null) {
-                    fieldError(cfDomainInput, R.string.settings_invalid_masking); return@setOnClickListener
+                    fieldError(cfDomainInput, R.string.settings_invalid_cfdomain); return@setOnClickListener
                 }
                 if (frontingSni.isNotEmpty() && CfProxyBalancer.normalizeDomain(frontingSni) == null) {
                     fieldError(frontingInput, R.string.settings_invalid_fronting); return@setOnClickListener
