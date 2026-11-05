@@ -19,6 +19,7 @@
     <string name="primary_action_start">Запустить</string>
     <string name="primary_action_stop">Остановить</string>
     <string name="secondary_action">Запустить отдельно</string>
+    <string name="proxy_already_running">Прокси запущен</string>
     <string name="metrics_title">Активность</string>
     <string name="metric_latency_label">Маршрут</string>
     <string name="metric_latency_value">Авто</string>
