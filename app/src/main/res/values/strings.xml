@@ -132,4 +132,8 @@
     <string name="settings_section_security">СЕКРЕТ И МАСКИРОВКА</string>
     <string name="settings_section_routing">МАРШРУТЫ И ОБХОД БЛОКИРОВОК</string>
     <string name="settings_section_performance">ПРОИЗВОДИТЕЛЬНОСТЬ</string>
+    <string name="settings_dialog_intro">Изменения параметров подключения могут потребовать повторно добавить прокси в Telegram.</string>
+    <string name="settings_secret_hint">Секрет подключения</string>
+    <string name="settings_show_secret">Показать</string>
+    <string name="settings_hide_secret">Скрыть</string>
 </resources>
