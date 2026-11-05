@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.text.method.PasswordTransformationMethod
 import android.provider.Settings
 import android.view.View
 import android.view.WindowInsets
@@ -329,6 +330,7 @@ class MainActivity : AppCompatActivity() {
         val maxConnInput = view.findViewById<EditText>(R.id.maxConnInput)
         val poolCheck = view.findViewById<CheckBox>(R.id.wsPoolCheck)
         val frontingInput = view.findViewById<EditText>(R.id.frontingSniInput)
+        val toggleSecretButton = view.findViewById<Button>(R.id.toggleSecretButton)
 
         workerInput.setText(options.cfWorkerDomain)
         maskingInput.setText(options.fakeTlsDomain)
@@ -345,17 +347,31 @@ class MainActivity : AppCompatActivity() {
         view.findViewById<Button>(R.id.generateSecretButton).setOnClickListener {
             secretInput.setText(TelegramProxy.generateSecret())
         }
+        toggleSecretButton.setOnClickListener {
+            val hidden = secretInput.transformationMethod is PasswordTransformationMethod
+            secretInput.transformationMethod =
+                if (hidden) null else PasswordTransformationMethod.getInstance()
+            toggleSecretButton.setText(
+                if (hidden) R.string.settings_hide_secret else R.string.settings_show_secret
+            )
+            secretInput.setSelection(secretInput.text.length)
+        }
         view.findViewById<Button>(R.id.copySecretButton).setOnClickListener {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("secret", secretInput.text.toString().trim()))
             Toast.makeText(this, R.string.settings_secret_copied, Toast.LENGTH_SHORT).show()
         }
 
-        AlertDialog.Builder(this)
+        // A standard positive button closes the dialog even after a field error.
+        // Keep it open until the settings are actually valid.
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.settings_dialog_title)
             .setView(view)
             .setNegativeButton(R.string.settings_cancel, null)
-            .setPositiveButton(R.string.settings_save) { _, _ ->
+            .setPositiveButton(R.string.settings_save, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
                 val worker = workerInput.text.toString().trim()
                 val masking = maskingInput.text.toString().trim()
                 val secret = secretInput.text.toString().trim().lowercase()
@@ -366,35 +382,48 @@ class MainActivity : AppCompatActivity() {
                 val frontingSni = frontingInput.text.toString().trim().lowercase()
 
                 if (secret.isNotEmpty() && !ProxyRuntime.isValidSecret(secret)) {
-                    toastError(R.string.settings_invalid_secret); return@setPositiveButton
+                    toastError(R.string.settings_invalid_secret); return@setOnClickListener
                 }
                 if (worker.split(separators).filter { it.isNotEmpty() }
                         .any { CfProxyBalancer.normalizeDomain(it) == null }
                 ) {
-                    toastError(R.string.settings_invalid_worker); return@setPositiveButton
+                    toastError(R.string.settings_invalid_worker); return@setOnClickListener
                 }
                 if (masking.isNotEmpty() && CfProxyBalancer.normalizeDomain(masking) == null) {
-                    toastError(R.string.settings_invalid_masking); return@setPositiveButton
+                    toastError(R.string.settings_invalid_masking); return@setOnClickListener
                 }
                 if (cfDomain.isNotEmpty() && CfProxyBalancer.normalizeDomain(cfDomain) == null) {
-                    toastError(R.string.settings_invalid_masking); return@setPositiveButton
+                    toastError(R.string.settings_invalid_masking); return@setOnClickListener
                 }
                 if (frontingSni.isNotEmpty() && CfProxyBalancer.normalizeDomain(frontingSni) == null) {
-                    toastError(R.string.settings_invalid_fronting); return@setPositiveButton
+                    toastError(R.string.settings_invalid_fronting); return@setOnClickListener
                 }
                 if (!isValidHost(host)) {
-                    toastError(R.string.settings_invalid_host); return@setPositiveButton
+                    toastError(R.string.settings_invalid_host); return@setOnClickListener
                 }
                 val port = portText.toIntOrNull()
                 if (port == null || port !in 1..65535) {
-                    toastError(R.string.settings_invalid_port); return@setPositiveButton
+                    toastError(R.string.settings_invalid_port); return@setOnClickListener
                 }
                 // Every non-empty DC:IP token must parse, otherwise a typo would be
                 // silently dropped and the user would think the override is active.
                 if (dcIps.split(separators).filter { it.isNotEmpty() }
                         .any { ProxyOptions.parseDcIpPair(it) == null }
                 ) {
-                    toastError(R.string.settings_invalid_dcip); return@setPositiveButton
+                    toastError(R.string.settings_invalid_dcip); return@setOnClickListener
+                }
+
+                val bufferKb = bufferInput.text.toString().trim().toIntOrNull()
+                if (bufferKb == null || bufferKb !in ProxyOptions.MIN_BUFFER_KB..ProxyOptions.MAX_BUFFER_KB) {
+                    toastError(R.string.settings_invalid_buffer)
+                    bufferInput.requestFocus()
+                    return@setOnClickListener
+                }
+                val maxConnections = maxConnInput.text.toString().trim().toIntOrNull()
+                if (maxConnections == null || maxConnections !in ProxyOptions.MIN_MAX_CONNECTIONS..ProxyOptions.MAX_MAX_CONNECTIONS) {
+                    toastError(R.string.settings_invalid_connections)
+                    maxConnInput.requestFocus()
+                    return@setOnClickListener
                 }
 
                 val updated = options.copy(
@@ -404,10 +433,8 @@ class MainActivity : AppCompatActivity() {
                     cfProxyUserDomain = cfDomain,
                     cfWorkerDomain = worker,
                     dcIpOverrides = dcIps,
-                    bufferKb = bufferInput.text.toString().trim().toIntOrNull()
-                        ?: ProxyOptions.DEFAULT_BUFFER_KB,
-                    maxConnections = maxConnInput.text.toString().trim().toIntOrNull()
-                        ?: ProxyOptions.DEFAULT_MAX_CONNECTIONS,
+                    bufferKb = bufferKb,
+                    maxConnections = maxConnections,
                     fakeTlsDomain = masking,
                     wsPoolEnabled = poolCheck.isChecked,
                     frontingSni = frontingSni
@@ -430,9 +457,11 @@ class MainActivity : AppCompatActivity() {
                 if (ProxyRuntime.isRunning()) ProxyService.start(this)
                 renderState(ProxyRuntime.snapshot(this))
                 Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
                 if (linkChanged) promptReconnectTelegram()
             }
-            .show()
+        }
+        dialog.show()
     }
 
     /**
