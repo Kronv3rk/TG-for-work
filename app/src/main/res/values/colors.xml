@@ -1,24 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="app_bg_start">#F6FAFC</color>
-    <color name="app_bg_end">#EAF3F8</color>
+    <color name="app_bg_start">#F7F9FA</color>
+    <color name="app_bg_end">#EEF2F4</color>
     <color name="surface">#FFFFFF</color>
-    <color name="surface_soft">#F3F8FB</color>
-    <color name="surface_tint">#EAF6FC</color>
-    <color name="surface_success">#E8F7EE</color>
-    <color name="surface_warning">#FFF5DF</color>
-    <color name="text_primary">#10212B</color>
-    <color name="text_secondary">#5D6B75</color>
-    <color name="text_muted">#7D8B94</color>
-    <color name="brand">#1187C9</color>
-    <color name="brand_dark">#0A5F8F</color>
-    <color name="brand_soft">#DDF1FA</color>
-    <color name="accent">#16A36B</color>
-    <color name="accent_dark">#0B7A50</color>
-    <color name="warning">#C97A14</color>
-    <color name="danger">#C43B4B</color>
-    <color name="danger_soft">#FCE9EC</color>
-    <color name="stroke">#DCE8EF</color>
-    <color name="stroke_strong">#BFD5E0</color>
+    <color name="surface_soft">#F5F8F8</color>
+    <color name="surface_tint">#EBF5F3</color>
+    <color name="surface_success">#E8F5EF</color>
+    <color name="surface_warning">#F2F4F6</color>
+    <color name="text_primary">#16252C</color>
+    <color name="text_secondary">#4A606B</color>
+    <color name="text_muted">#566D78</color>
+    <color name="brand">#0F6D73</color>
+    <color name="brand_dark">#0D5960</color>
+    <color name="brand_soft">#DFF0EE</color>
+    <color name="accent">#16855F</color>
+    <color name="accent_dark">#116B4B</color>
+    <color name="warning">#9C5C08</color>
+    <color name="danger">#B6384D</color>
+    <color name="danger_soft">#FCECEF</color>
+    <color name="stroke">#E1E8EB</color>
+    <color name="stroke_strong">#CDD9DE</color>
     <color name="white">#FFFFFF</color>
 </resources>

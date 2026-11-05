@@ -76,17 +76,10 @@ class TelegramProxy(
     private var poolMaintenance: ScheduledExecutorService? = null
 
     val proxyLink: String
-        get() = if (options.fakeTlsEnabled) fakeTlsProxyLink else plainProxyLink
+        get() = ProxyLinkFormatter.link(options)
 
     val plainProxyLink: String
-        get() = "tg://proxy?server=${options.host}&port=${options.port}&secret=dd${options.secretHex}"
-
-    private val fakeTlsProxyLink: String
-        get() {
-            val domainHex = options.fakeTlsDomain.toByteArray(Charsets.US_ASCII)
-                .joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-            return "tg://proxy?server=${options.host}&port=${options.port}&secret=ee${options.secretHex}$domainHex"
-        }
+        get() = ProxyLinkFormatter.plain(options)
 
     val isRunning: Boolean
         get() = serverSocket?.isClosed == false
