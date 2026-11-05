@@ -114,21 +114,29 @@ class FakeTls(private val secret: ByteArray, private val maskingDomain: String) 
         rawOutput: BufferedOutputStream,
         initialData: ByteArray
     ) {
-        runCatching {
-            Socket().use { upstream ->
-                upstream.tcpNoDelay = true
-                upstream.connect(InetSocketAddress(maskingDomain, 443), 10_000)
-                val upstreamInput = BufferedInputStream(upstream.getInputStream())
-                val upstreamOutput = BufferedOutputStream(upstream.getOutputStream())
-                upstreamOutput.write(initialData)
-                upstreamOutput.flush()
+        maskingForwardingGate.withPermit {
+            runCatching {
+                Socket().use { upstream ->
+                    upstream.tcpNoDelay = true
+                    upstream.connect(InetSocketAddress(maskingDomain, 443), 10_000)
+                    upstream.soTimeout = 15_000
+                    val upstreamInput = BufferedInputStream(upstream.getInputStream())
+                    val upstreamOutput = BufferedOutputStream(upstream.getOutputStream())
+                    upstreamOutput.write(initialData)
+                    upstreamOutput.flush()
 
-                val up = Thread { rawInput.copyTo(upstreamOutput, BUFFER_SIZE) }
-                val down = Thread { upstreamInput.copyTo(rawOutput, BUFFER_SIZE) }
-                up.start()
-                down.start()
-                up.join()
-                down.join()
+                    val up = Thread({
+                        runCatching { rawInput.copyTo(upstreamOutput, BUFFER_SIZE) }
+                    }, "masking-client-to-site").apply { isDaemon = true }
+                    val down = Thread({
+                        runCatching { upstreamInput.copyTo(rawOutput, BUFFER_SIZE) }
+                    }, "masking-site-to-client").apply { isDaemon = true }
+                    up.start()
+                    down.start()
+                    // Never let a malformed or idle client tie up two threads forever.
+                    up.join(15_000)
+                    down.join(15_000)
+                }
             }
         }
     }
@@ -136,6 +144,7 @@ class FakeTls(private val secret: ByteArray, private val maskingDomain: String) 
     private data class VerifyResult(val clientRandom: ByteArray, val sessionId: ByteArray)
 
     companion object {
+        private val maskingForwardingGate = ConnectionGate(8)
         const val TLS_RECORD_HANDSHAKE = 0x16
         private const val TLS_RECORD_APPDATA = 0x17
         private const val HANDSHAKE_LEN = 64
