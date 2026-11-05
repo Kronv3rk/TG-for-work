@@ -571,8 +571,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun copyProxyLink() {
-        ProxyRuntime.start(this)
-        ProxyService.start(this)
         ProxyRuntime.copyLink(this)
         renderState(ProxyRuntime.snapshot(this))
     }
