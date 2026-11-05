@@ -1,5 +1,2 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="@color/brand" />
-    <corners android:radius="8dp" />
-</shape>
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="@color/brand_dark"><item><shape><solid android:color="@color/brand"/><corners android:radius="14dp"/></shape></item></ripple>

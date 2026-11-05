@@ -86,7 +86,22 @@ object ProxyRuntime {
 
     fun isRunning(): Boolean = proxy?.isRunning == true
 
-    fun currentLink(context: Context): String = start(context).proxyLink
+    /** Network callbacks update only the running instance; they must never start a
+     * stopped proxy, rotate its secret, or read credential-protected storage. */
+    @Synchronized
+    fun onDefaultNetworkChanged(cellular: Boolean, forceReset: Boolean) {
+        proxy?.takeIf { it.isRunning }?.onDefaultNetworkChanged(cellular, forceReset)
+    }
+
+    @Synchronized
+    fun onDefaultNetworkLost() {
+        proxy?.takeIf { it.isRunning }?.onDefaultNetworkLost()
+    }
+
+    /** Link generation must not start the local proxy or foreground service. */
+    fun currentLink(context: Context): String =
+        proxy?.takeIf { it.isRunning }?.proxyLink
+            ?: ProxyLinkFormatter.link(loadOptions(context.applicationContext))
 
     fun setFakeTlsEnabled(context: Context, enabled: Boolean) {
         val value = if (enabled) ProxyOptions.DEFAULT_FAKE_TLS_DOMAIN else ""

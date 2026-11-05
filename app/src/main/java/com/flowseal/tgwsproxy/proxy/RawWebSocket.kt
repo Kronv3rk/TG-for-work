@@ -8,6 +8,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.security.SecureRandom
+import java.security.MessageDigest
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SNIServerName
 import javax.net.ssl.SSLSocket
@@ -30,6 +31,7 @@ class RawWebSocket private constructor(
 ) : Closeable {
     @Volatile
     private var closed = false
+    private val messageAssembler = WebSocketMessageAssembler(WebSocketProtocol.MAX_FRAME_BYTES.toInt())
 
     /** True while the socket still looks usable; checked before a pooled socket is handed out. */
     val isOpen: Boolean
@@ -60,27 +62,20 @@ class RawWebSocket private constructor(
             if (second < 0) return null
 
             val opcode = first and 0x0F
-            var length = second and 0x7F
-            if (length == 126) {
-                length = readUnsignedShort()
-            } else if (length == 127) {
-                val longLength = readLong()
-                if (longLength > MAX_FRAME_SIZE) {
-                    throw IllegalStateException("Frame is too large")
-                }
-                length = longLength.toInt()
+            val shortLength = second and 0x7F
+            val length = when (shortLength) {
+                126 -> readUnsignedShort().toLong()
+                127 -> readLong()
+                else -> shortLength.toLong()
             }
-            if (length > MAX_FRAME_SIZE) {
-                throw IllegalStateException("Frame is too large")
-            }
-
-            val mask = if ((second and 0x80) != 0) readExact(4) else null
-            val payload = readExact(length)
-            val data = if (mask != null) xorMask(payload, mask) else payload
+            // Validate before allocating memory for an untrusted frame.
+            WebSocketProtocol.validateServerFrame(first, second, length)
+            val data = readExact(length.toInt())
+            val fin = (first and 0x80) != 0
 
             when (opcode) {
                 OP_CLOSE -> {
-                    closed = true
+                    close()
                     return null
                 }
                 OP_PING -> {
@@ -90,7 +85,10 @@ class RawWebSocket private constructor(
                     }
                 }
                 OP_PONG -> Unit
-                OP_TEXT, OP_BINARY -> return data
+                OP_TEXT, OP_BINARY, 0 -> {
+                    val message = messageAssembler.accept(opcode, fin, data)
+                    if (message != null) return message
+                }
             }
         }
         return null
@@ -160,6 +158,7 @@ class RawWebSocket private constructor(
     }
 
     companion object {
+        private const val WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
         private const val OP_TEXT = 0x1
         private const val OP_BINARY = 0x2
         private const val OP_CLOSE = 0x8
@@ -210,6 +209,9 @@ class RawWebSocket private constructor(
                 ssl = connectedSsl
                 connectedSsl.sslParameters = connectedSsl.sslParameters.apply {
                     serverNames = listOf<SNIServerName>(SNIHostName(serverName))
+                    // For normal TLS require the certificate to match the relay host.
+                    // Experimental fronting retains its separate, opt-in policy.
+                    if (sni == null) endpointIdentificationAlgorithm = "HTTPS"
                 }
                 connectedSsl.startHandshake()
                 connectedSsl.soTimeout = timeoutMs
@@ -236,9 +238,15 @@ class RawWebSocket private constructor(
                 val firstLine = lines.firstOrNull().orEmpty()
                 val status = firstLine.split(" ").getOrNull(1)?.toIntOrNull() ?: 0
                 if (status != 101) {
-                    runCatching { connectedSsl.close() }
                     throw WebSocketHandshakeException(status, firstLine.ifBlank { "Empty WebSocket response" })
                 }
+                val expectedAccept = Base64.encodeToString(
+                    MessageDigest.getInstance("SHA-1").digest(
+                        (wsKey + WEBSOCKET_GUID).toByteArray(Charsets.US_ASCII)
+                    ),
+                    Base64.NO_WRAP
+                )
+                WebSocketProtocol.validateUpgrade(lines, expectedAccept)
 
                 // Keep an idle read budget instead of blocking forever: receive()
                 // uses it to drive keepalive pings and to detect dead relays.

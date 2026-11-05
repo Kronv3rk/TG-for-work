@@ -6,17 +6,28 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import com.flowseal.tgwsproxy.proxy.ConnectionLog
+import com.flowseal.tgwsproxy.proxy.DefaultNetworkTracker
 import com.flowseal.tgwsproxy.proxy.ProxyRuntime
 
 class ProxyService : Service() {
     private val handler = Handler(Looper.getMainLooper())
+    private val networkThread = HandlerThread("tg-proxy-network-events")
+    private lateinit var networkHandler: Handler
+    private val networkTracker = DefaultNetworkTracker()
+    private var networkManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var networkMonitoring = false
     private val refreshNotification = object : Runnable {
         override fun run() {
             if (!ProxyRuntime.isRunning()) return
@@ -28,6 +39,8 @@ class ProxyService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        networkThread.start()
+        networkHandler = Handler(networkThread.looper)
         createNotificationChannel()
     }
 
@@ -35,6 +48,16 @@ class ProxyService : Service() {
         // Before the user unlocks the device after a reboot the settings store is
         // unreadable, so starting here would refuse to run rather than mint a new
         // identity. Stay alive and let a later start command bring the proxy up.
+        // Stop must work even while credential-protected settings are locked.
+        // Otherwise a user-issued STOP can be ignored before dispatch.
+        if (intent?.action == ACTION_STOP) {
+            stopNetworkMonitoring()
+            ProxyRuntime.stop()
+            ProxyKeepAlive.release()
+            stopForegroundCompat()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (!canStartProxy()) return START_STICKY
         when (intent?.action ?: ACTION_START) {
             ACTION_OPEN_TELEGRAM -> {
@@ -50,13 +73,6 @@ class ProxyService : Service() {
             ACTION_RESTART -> {
                 ProxyRuntime.restart(this)
                 startForegroundCompat()
-            }
-            ACTION_STOP -> {
-                ProxyRuntime.stop()
-                ProxyKeepAlive.release()
-                stopForegroundCompat()
-                stopSelf()
-                return START_NOT_STICKY
             }
             else -> {
                 ProxyRuntime.start(this)
@@ -76,6 +92,8 @@ class ProxyService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(refreshNotification)
+        stopNetworkMonitoring()
+        networkThread.quitSafely()
         ProxyRuntime.stop()
         ProxyKeepAlive.release()
         super.onDestroy()
@@ -112,6 +130,80 @@ class ProxyService : Service() {
         }
         handler.removeCallbacks(refreshNotification)
         handler.postDelayed(refreshNotification, NOTIFICATION_REFRESH_MS)
+        startNetworkMonitoring()
+    }
+
+    /**
+     * Listen only while the proxy service is active. Use the supplied capabilities,
+     * not synchronous ConnectivityManager queries from inside network callbacks.
+     */
+    private fun startNetworkMonitoring() {
+        if (networkCallback != null) return
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                // API 24-25 dispatch callbacks on the connectivity thread. Android
+                // 26+ uses our Handler, supplied at registration below.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                    networkHandler.post { handleNetworkCapabilities(this, network, capabilities) }
+                } else {
+                    handleNetworkCapabilities(this, network, capabilities)
+                }
+            }
+
+            override fun onLost(network: Network) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                    networkHandler.post { handleNetworkLost(this, network) }
+                } else {
+                    handleNetworkLost(this, network)
+                }
+            }
+        }
+        networkMonitoring = true
+        networkCallback = callback
+        networkManager = manager
+        val registered = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                manager.registerDefaultNetworkCallback(callback, networkHandler)
+            } else {
+                manager.registerDefaultNetworkCallback(callback)
+            }
+        }
+        if (registered.isFailure) {
+            networkMonitoring = false
+            networkCallback = null
+            networkManager = null
+            ConnectionLog.info("Не удалось отслеживать смену сети")
+        }
+    }
+
+    private fun handleNetworkCapabilities(
+        callback: ConnectivityManager.NetworkCallback,
+        network: Network,
+        capabilities: NetworkCapabilities
+    ) {
+        if (!networkMonitoring || networkCallback !== callback || !ProxyRuntime.isRunning()) return
+        val wifi = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        val cellular = !wifi && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+        val handover = networkTracker.changed(network.toString(), cellular, wifi)
+        ProxyRuntime.onDefaultNetworkChanged(cellular, forceReset = handover)
+        ProxyKeepAlive.setWifiActive(this, wifi)
+    }
+
+    private fun handleNetworkLost(callback: ConnectivityManager.NetworkCallback, network: Network) {
+        if (!networkMonitoring || networkCallback !== callback || !ProxyRuntime.isRunning()) return
+        if (networkTracker.lost(network.toString())) {
+            ProxyRuntime.onDefaultNetworkLost()
+            ProxyKeepAlive.setWifiActive(this, false)
+        }
+    }
+
+    private fun stopNetworkMonitoring() {
+        networkMonitoring = false
+        val callback = networkCallback ?: return
+        networkCallback = null
+        runCatching { networkManager?.unregisterNetworkCallback(callback) }
+        networkManager = null
     }
 
     private fun stopForegroundCompat() {

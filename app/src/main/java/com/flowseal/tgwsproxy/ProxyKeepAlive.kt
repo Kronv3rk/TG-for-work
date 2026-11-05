@@ -1,6 +1,8 @@
 package com.flowseal.tgwsproxy
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.PowerManager
 import com.flowseal.tgwsproxy.proxy.ConnectionLog
@@ -36,18 +38,34 @@ object ProxyKeepAlive {
                 wakeLock = lock
             }
         }
-        if (wifiLock?.isHeld != true) {
-            val wifi = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            // WIFI_MODE_FULL_HIGH_PERF is deprecated but still the only way to stop
-            // the radio from sleeping on the devices where relay sockets get dropped.
-            val lock = wifi?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, WIFI_TAG)
-            if (lock != null) {
-                lock.setReferenceCounted(false)
-                runCatching { lock.acquire() }
-                wifiLock = lock
-            }
+        setWifiActive(appContext, currentNetworkUsesWifi(appContext))
+        ConnectionLog.info("Фоновый режим: CPU активен, Wi-Fi удерживается только при подключении по Wi-Fi")
+    }
+
+    /** A Wi-Fi lock must not drain power while the default network is mobile. */
+    @Suppress("DEPRECATION")
+    @Synchronized
+    fun setWifiActive(context: Context, active: Boolean) {
+        if (!active) {
+            wifiLock?.let { lock -> if (lock.isHeld) runCatching { lock.release() } }
+            wifiLock = null
+            return
         }
-        ConnectionLog.info("Фоновый режим: CPU и Wi-Fi удерживаются активными")
+        if (wifiLock?.isHeld == true) return
+        val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        val lock = wifi?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, WIFI_TAG)
+        if (lock != null) {
+            lock.setReferenceCounted(false)
+            if (runCatching { lock.acquire() }.isSuccess) wifiLock = lock
+        }
+    }
+
+    private fun currentNetworkUsesWifi(context: Context): Boolean {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = manager.activeNetwork ?: return false
+        return manager.getNetworkCapabilities(network)
+            ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
     }
 
     @Synchronized

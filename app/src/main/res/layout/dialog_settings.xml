@@ -1,81 +1,135 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content">
+    android:layout_height="wrap_content"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingLeft="22dp"
-        android:paddingTop="14dp"
-        android:paddingRight="22dp"
-        android:paddingBottom="6dp">
+        android:paddingStart="20dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="24dp">
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:fontFamily="sans-serif-medium"
-            android:text="@string/settings_worker_label"
-            android:textColor="@color/text_primary"
+            android:text="@string/settings_dialog_intro"
+            android:textColor="@color/text_secondary"
             android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.07"
+            android:text="@string/settings_section_local"
+            android:textColor="@color/brand_dark"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:fontFamily="sans-serif-medium"
+            android:labelFor="@id/hostInput"
+            android:text="@string/settings_host_label"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp" />
 
         <EditText
-            android:id="@+id/workerDomainInput"
+            android:id="@+id/hostInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:hint="@string/settings_worker_hint"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
             android:importantForAutofill="no"
             android:inputType="textUri"
-            android:minHeight="48dp"
-            android:textSize="14sp" />
-
+            android:minHeight="52dp"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
+            android:hint="@string/settings_host_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="15sp"
+             />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="14dp"
             android:fontFamily="sans-serif-medium"
-            android:text="@string/settings_masking_label"
+            android:labelFor="@id/portInput"
+            android:text="@string/settings_port_label"
             android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+            android:textSize="15sp" />
 
         <EditText
-            android:id="@+id/maskingDomainInput"
+            android:id="@+id/portInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:hint="@string/settings_masking_hint"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
             android:importantForAutofill="no"
-            android:inputType="textUri"
-            android:minHeight="48dp"
-            android:textSize="14sp" />
+            android:inputType="number"
+            android:minHeight="52dp"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
+            android:hint="@string/settings_port_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="15sp"
+             />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="24dp"
             android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.07"
+            android:text="@string/settings_section_security"
+            android:textColor="@color/brand_dark"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:fontFamily="sans-serif-medium"
+            android:labelFor="@id/secretInput"
             android:text="@string/settings_secret_label"
             android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+            android:textSize="15sp" />
 
         <EditText
             android:id="@+id/secretInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:fontFamily="monospace"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
             android:importantForAutofill="no"
-            android:inputType="textNoSuggestions"
-            android:minHeight="48dp"
-            android:textSize="13sp" />
-
+            android:inputType="textPassword"
+            android:minHeight="52dp"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
+            android:hint="@string/settings_secret_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="14sp"
+            android:fontFamily="monospace" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="10dp"
             android:baselineAligned="false"
             android:orientation="horizontal">
 
@@ -83,188 +137,285 @@
                 android:id="@+id/generateSecretButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginRight="6dp"
+                android:layout_marginEnd="6dp"
                 android:layout_weight="1"
-                android:minHeight="48dp"
+                android:background="@drawable/bg_secondary_button"
+                android:minHeight="50dp"
                 android:text="@string/settings_generate"
                 android:textAllCaps="false"
-                android:textSize="13sp" />
+                android:textColor="@color/brand_dark"
+                android:textSize="14sp" />
 
             <Button
-                android:id="@+id/copySecretButton"
+                android:id="@+id/toggleSecretButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginLeft="6dp"
+                android:layout_marginStart="6dp"
                 android:layout_weight="1"
-                android:minHeight="48dp"
-                android:text="@string/settings_copy_secret"
+                android:background="@drawable/bg_secondary_button"
+                android:minHeight="50dp"
+                android:text="@string/settings_show_secret"
                 android:textAllCaps="false"
-                android:textSize="13sp" />
+                android:textColor="@color/brand_dark"
+                android:textSize="14sp" />
         </LinearLayout>
+
+        <Button
+            android:id="@+id/copySecretButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_secondary_button"
+            android:minHeight="50dp"
+            android:text="@string/settings_copy_secret"
+            android:textAllCaps="false"
+            android:textColor="@color/brand_dark"
+            android:textSize="14sp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="14dp"
             android:fontFamily="sans-serif-medium"
+            android:labelFor="@id/maskingDomainInput"
+            android:text="@string/settings_masking_label"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp" />
+
+        <EditText
+            android:id="@+id/maskingDomainInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:importantForAutofill="no"
+            android:inputType="textUri"
+            android:minHeight="52dp"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
+            android:hint="@string/settings_masking_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="15sp"
+             />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.07"
+            android:text="@string/settings_section_routing"
+            android:textColor="@color/brand_dark"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:fontFamily="sans-serif-medium"
+            android:labelFor="@id/workerDomainInput"
+            android:text="@string/settings_worker_label"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp" />
+
+        <EditText
+            android:id="@+id/workerDomainInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:importantForAutofill="no"
+            android:inputType="textUri"
+            android:minHeight="52dp"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
+            android:hint="@string/settings_worker_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="15sp"
+             />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:fontFamily="sans-serif-medium"
+            android:labelFor="@id/cfDomainInput"
             android:text="@string/settings_cfdomain_label"
             android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+            android:textSize="15sp" />
 
         <EditText
             android:id="@+id/cfDomainInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
+            android:importantForAutofill="no"
+            android:inputType="textUri"
+            android:minHeight="52dp"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
             android:hint="@string/settings_cfdomain_hint"
-            android:importantForAutofill="no"
-            android:inputType="textUri"
-            android:minHeight="48dp"
-            android:textSize="14sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:fontFamily="sans-serif-medium"
-            android:text="@string/settings_host_label"
             android:textColor="@color/text_primary"
-            android:textSize="14sp" />
-
-        <EditText
-            android:id="@+id/hostInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:hint="@string/settings_host_hint"
-            android:importantForAutofill="no"
-            android:inputType="textUri"
-            android:minHeight="48dp"
-            android:textSize="14sp" />
-
+            android:textColorHint="@color/text_muted"
+            android:textSize="15sp"
+             />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="14dp"
             android:fontFamily="sans-serif-medium"
-            android:text="@string/settings_port_label"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
-
-        <EditText
-            android:id="@+id/portInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:hint="@string/settings_port_hint"
-            android:importantForAutofill="no"
-            android:inputType="number"
-            android:minHeight="48dp"
-            android:textSize="14sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:fontFamily="sans-serif-medium"
+            android:labelFor="@id/dcIpInput"
             android:text="@string/settings_dcip_label"
             android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+            android:textSize="15sp" />
 
         <EditText
             android:id="@+id/dcIpInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:hint="@string/settings_dcip_hint"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
             android:importantForAutofill="no"
             android:inputType="textUri"
-            android:minHeight="48dp"
-            android:textSize="14sp" />
+            android:minHeight="52dp"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
+            android:hint="@string/settings_dcip_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="15sp"
+             />
 
         <CheckBox
             android:id="@+id/wsPoolCheck"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:minHeight="48dp"
+            android:layout_marginTop="18dp"
+            android:minHeight="52dp"
             android:text="@string/settings_pool_label"
             android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+            android:textSize="15sp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/settings_pool_hint"
             android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
+            android:textSize="13sp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="14dp"
             android:fontFamily="sans-serif-medium"
+            android:labelFor="@id/frontingSniInput"
             android:text="@string/settings_fronting_label"
             android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+            android:textSize="15sp" />
 
         <EditText
             android:id="@+id/frontingSniInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:hint="@string/settings_fronting_hint"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
             android:importantForAutofill="no"
             android:inputType="textUri"
-            android:minHeight="48dp"
-            android:textSize="14sp" />
+            android:minHeight="52dp"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
+            android:hint="@string/settings_fronting_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="15sp"
+             />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:text="@string/settings_fronting_note"
             android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
+            android:textSize="13sp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="24dp"
             android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.07"
+            android:text="@string/settings_section_performance"
+            android:textColor="@color/brand_dark"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:fontFamily="sans-serif-medium"
+            android:labelFor="@id/bufferInput"
             android:text="@string/settings_buffer_label"
             android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+            android:textSize="15sp" />
 
         <EditText
             android:id="@+id/bufferInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:hint="@string/settings_buffer_hint"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
             android:importantForAutofill="no"
             android:inputType="number"
-            android:minHeight="48dp"
-            android:textSize="14sp" />
-
+            android:minHeight="52dp"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
+            android:hint="@string/settings_buffer_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="15sp"
+             />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="14dp"
             android:fontFamily="sans-serif-medium"
+            android:labelFor="@id/maxConnInput"
             android:text="@string/settings_maxconn_label"
             android:textColor="@color/text_primary"
-            android:textSize="14sp" />
+            android:textSize="15sp" />
 
         <EditText
             android:id="@+id/maxConnInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:hint="@string/settings_maxconn_hint"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_input"
             android:importantForAutofill="no"
             android:inputType="number"
-            android:minHeight="48dp"
-            android:textSize="14sp" />
+            android:minHeight="52dp"
+            android:paddingStart="14dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="10dp"
+            android:hint="@string/settings_maxconn_hint"
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="15sp"
+             />
 
     </LinearLayout>
 </ScrollView>
