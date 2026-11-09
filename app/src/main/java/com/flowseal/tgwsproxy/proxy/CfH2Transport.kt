@@ -182,6 +182,7 @@ internal class CfH2Transport(
         private val transportErrorDelivered = AtomicBoolean(false)
         private val requests = Semaphore(MAX_CHANNEL_REQUESTS)
         private val pendingCalls = ConcurrentHashMap<Call, PendingCall>()
+        private val intentionallyCancelled = ConcurrentHashMap.newKeySet<Call>()
         private val pending = AtomicInteger(0)
         private val queuedReplies = ArrayBlockingQueue<QueuedReply>(MAX_CHANNEL_REQUESTS)
         private val replyLock = Any()
@@ -264,7 +265,7 @@ internal class CfH2Transport(
                 }
                 call.enqueue(object : Callback {
                     override fun onFailure(call: Call, error: IOException) {
-                        if (!call.isCanceled()) fail(error)
+                        if (!intentionallyCancelled.remove(call)) fail(error)
                         complete(call)
                     }
 
@@ -457,6 +458,7 @@ internal class CfH2Transport(
             val age = System.nanoTime() / 1_000_000L - sent
             if (sent == Long.MIN_VALUE || record.receiving.get() || age < minimumAgeMs) return false
             record.ticket?.let(replayWindow::retire)
+            intentionallyCancelled.add(call)
             call.cancel()
             complete(call)
             return true
@@ -539,6 +541,7 @@ internal class CfH2Transport(
                 }
             }
             replayWindow.clear()
+            intentionallyCancelled.clear()
             channels.remove(this)
         }
     }
