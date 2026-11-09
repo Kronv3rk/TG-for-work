@@ -91,6 +91,8 @@ internal class CfH2Transport(
         message: String
     ) : IOException(message)
 
+    private class H2LocalCapacityError(message: String) : IOException(message)
+
     private val lanes = ConcurrentHashMap<String, Lane>()
     private val failedUntil = ConcurrentHashMap<String, Long>()
     private val channels = ConcurrentHashMap.newKeySet<Channel>()
@@ -283,6 +285,7 @@ internal class CfH2Transport(
                                     if (ticket != null) replayWindow.markProgress(ticket)
                                 }
                                 var queued = false
+                                var queueError: IOException? = null
                                 if (result.body.isNotEmpty() && replayWindow.acceptReply(ticket, result.body)) {
                                     synchronized(replyLock) {
                                         if (!closed.get()) {
@@ -294,6 +297,7 @@ internal class CfH2Transport(
                                                 lastProgress.set(System.currentTimeMillis())
                                             } else {
                                                 queuedBytes.addAndGet(-result.body.size)
+                                                queueError = H2LocalCapacityError("H2 channel reply queue budget exceeded")
                                             }
                                         }
                                     }
@@ -301,6 +305,7 @@ internal class CfH2Transport(
                                 if (!queued && result.reservedBytes > 0) {
                                     lane.releaseReply(result.reservedBytes)
                                 }
+                                queueError?.let(::fail)
                             }
                         } catch (error: H2TransportError) {
                             fail(error)
@@ -432,7 +437,9 @@ internal class CfH2Transport(
                 transportError.compareAndSet(0, error.nativeCode)
             } else {
                 failure.compareAndSet(null, error)
-                failedUntil[host] = System.currentTimeMillis() + DOMAIN_COOLDOWN_MS
+                if (error !is H2LocalCapacityError) {
+                    failedUntil[host] = System.currentTimeMillis() + DOMAIN_COOLDOWN_MS
+                }
             }
             close()
         }
@@ -490,7 +497,7 @@ internal class CfH2Transport(
                         throw IOException("H2 response exceeds size limit")
                     }
                     if (!lane.reserveReply(count)) {
-                        throw IOException("H2 lane reply memory budget exceeded")
+                        throw H2LocalCapacityError("H2 lane reply memory budget exceeded")
                     }
                     reserved += count
                     result.write(buffer, 0, count)
