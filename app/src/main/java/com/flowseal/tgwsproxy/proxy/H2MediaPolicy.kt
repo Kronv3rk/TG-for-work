@@ -16,7 +16,8 @@ internal object H2MediaPolicy {
         if (contentType?.contains("text/html", ignoreCase = true) == true) {
             throw IOException("Cloudflare /api returned HTML instead of MTProto")
         }
-        if (body.isEmpty() || body.size > MAX_REPLY_BYTES || body.size % 4 != 0) {
+        if (body.isEmpty()) return
+        if (body.size > MAX_REPLY_BYTES || body.size % 4 != 0) {
             throw IOException("Invalid or oversized MTProto HTTP/2 reply")
         }
     }

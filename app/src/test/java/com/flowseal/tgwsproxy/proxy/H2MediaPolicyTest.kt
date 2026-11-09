@@ -40,6 +40,11 @@ class H2MediaPolicyTest {
     }
 
     @Test
+    fun acceptsEmptyHttp2PollResponseWithoutTreatingItAsMalformed() {
+        H2MediaPolicy.validateReply("h2", 200, "application/octet-stream", ByteArray(0))
+    }
+
+    @Test
     fun limitsMemoryPerHttp2Response() {
         assertThrows(IOException::class.java) {
             H2MediaPolicy.validateReply(

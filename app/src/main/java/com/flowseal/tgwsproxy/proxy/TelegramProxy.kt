@@ -3,6 +3,7 @@ package com.flowseal.tgwsproxy.proxy
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.Closeable
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
@@ -568,7 +569,12 @@ class TelegramProxy(
                     break
                 }
                 bytesUp.addAndGet(packet.body.size.toLong())
-                channel.send(packet.body)
+                try {
+                    channel.send(packet.body)
+                } catch (error: IOException) {
+                    channel.abort(error)
+                    throw error
+                }
             }
         } catch (error: Exception) {
             ConnectionLog.info("HTTP/2 отправка: ${ConnectionLog.failureReason(error)}")

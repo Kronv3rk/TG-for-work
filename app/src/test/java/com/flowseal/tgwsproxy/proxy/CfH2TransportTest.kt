@@ -12,6 +12,8 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CfH2TransportTest {
@@ -94,4 +96,96 @@ class CfH2TransportTest {
             }
         }
     }
+
+    @Test(timeout = 15_000)
+    fun reusesOnePreflightedOriginLaneAcrossTelegramMediaChannels() {
+        createServer(http2 = true).use { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(200))
+            val firstReply = ByteArray(24) { 1 }
+            val secondReply = ByteArray(24) { 2 }
+            fixture.server.enqueue(
+                MockResponse().addHeader("Content-Type", "application/octet-stream")
+                    .setBody(Buffer().write(firstReply))
+            )
+            fixture.server.enqueue(
+                MockResponse().addHeader("Content-Type", "application/octet-stream")
+                    .setBody(Buffer().write(secondReply))
+            )
+            val transport = CfH2Transport(fixture.client)
+            try {
+                val endpoint = "localhost:${fixture.server.port}"
+                val first = transport.open(listOf(endpoint))!!
+                val second = transport.open(listOf(endpoint))!!
+                first.send(ByteArray(24).also { it[0] = 1 })
+                second.send(ByteArray(24).also { it[0] = 1; it[8] = 2 })
+                assertArrayEquals(firstReply, first.receive())
+                assertArrayEquals(secondReply, second.receive())
+                assertEquals("one HEAD preflight and two multiplexed POSTs", 3, fixture.server.requestCount)
+                first.close()
+                second.close()
+            } finally {
+                transport.close()
+            }
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun retriesAStalledResponseAndSuppressesTheLateDuplicate() {
+        createServer(http2 = true).use { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(200))
+            val responseBytes = ByteArray(24) { (it + 9).toByte() }
+            fixture.server.enqueue(
+                MockResponse().setHeadersDelay(3_500, TimeUnit.MILLISECONDS)
+                    .addHeader("Content-Type", "application/octet-stream")
+                    .setBody(Buffer().write(responseBytes))
+            )
+            fixture.server.enqueue(
+                MockResponse().addHeader("Content-Type", "application/octet-stream")
+                    .setBody(Buffer().write(responseBytes))
+            )
+            val transport = CfH2Transport(fixture.client)
+            try {
+                val channel = transport.open(listOf("localhost:${fixture.server.port}"))!!
+                channel.send(ByteArray(24).also { it[0] = 1 })
+                assertArrayEquals(responseBytes, channel.receive())
+                Thread.sleep(1_000L)
+                assertEquals("HEAD plus original and one replay", 3, fixture.server.requestCount)
+                assertEquals("late duplicate response must not be queued", 0, channel.queuedReplyCount)
+                assertFalse(channel.failed)
+                channel.close()
+            } finally {
+                transport.close()
+            }
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun mapsCloudflareHttpErrorsToNativeMtprotoErrorPackets() {
+        createServer(http2 = true).use { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(200))
+            fixture.server.enqueue(MockResponse().setResponseCode(403))
+            val transport = CfH2Transport(fixture.client)
+            try {
+                val channel = transport.open(listOf("localhost:${fixture.server.port}"))!!
+                channel.send(ByteArray(24).also { it[0] = 1 })
+                val error = channel.receive()!!
+                assertArrayEquals(byteArrayOf(109, 0xfe.toByte(), 0xff.toByte(), 0xff.toByte()), error)
+                assertTrue(channel.failed)
+            } finally {
+                transport.close()
+            }
+        }
+    }
+
+    @Test
+    fun boundsAggregateReplyMemoryAcrossChannelsOnTheSameLane() {
+        val lane = CfH2Transport.Lane()
+        assertTrue(lane.reserveReply(20 * 1024 * 1024))
+        assertTrue(lane.reserveReply(12 * 1024 * 1024))
+        assertFalse(lane.reserveReply(1))
+        lane.releaseReply(20 * 1024 * 1024)
+        assertTrue(lane.reserveReply(1))
+        lane.releaseReply(12 * 1024 * 1024 + 1)
+    }
+
 }
