@@ -41,11 +41,11 @@ internal object FakeTlsMaskingProfileProbe {
         return null
     }
 
-    fun probe(domain: String, timeoutMs: Int = 5_000): Int? {
+    fun probe(domain: String, timeoutMs: Int = 5_000, port: Int = 443): Int? {
         if (domain.isBlank() || timeoutMs < MIN_TIMEOUT_MS) return null
         val engine = try {
             val sslContext = SSLContext.getDefault()
-            sslContext.createSSLEngine(domain, 443).apply {
+            sslContext.createSSLEngine(domain, port).apply {
                 useClientMode = true
                 if ("TLSv1.3" !in supportedProtocols) return null
                 enabledProtocols = arrayOf("TLSv1.3")
@@ -90,7 +90,7 @@ internal object FakeTlsMaskingProfileProbe {
             Socket().use { socket ->
                 val connectedMs = remainingMs(deadline)
                 if (connectedMs <= 0) return null
-                socket.connect(InetSocketAddress(domain, 443), connectedMs)
+                socket.connect(InetSocketAddress(domain, port), connectedMs)
                 socket.tcpNoDelay = true
                 socket.getOutputStream().apply {
                     write(hello)
