@@ -37,6 +37,7 @@ class TelegramProxy(
     /** Socket/relay buffer and worker-thread ceiling, both user-tunable. */
     private val bufferSize = options.bufferBytes
     private val executor = newProxyExecutor(options.threadLimit)
+    private val sessionBudget = ProxySessionBudget(options.threadLimit)
     private val cfBalancer = CfProxyBalancer()
     private val routePlanner = RoutePlanner()
     private val clients = CopyOnWriteArraySet<Socket>()
@@ -138,21 +139,33 @@ class TelegramProxy(
             while (!server.isClosed) {
                 try {
                     val socket = server.accept()
-                    socket.soTimeout = initialHandshakeTimeoutMs
-                    socket.tcpNoDelay = true
-                    socket.keepAlive = true
-                    socket.receiveBufferSize = bufferSize
-                    socket.sendBufferSize = bufferSize
-                    clients += socket
-                    totalConnections.incrementAndGet()
-                    activeConnections.incrementAndGet()
-                    try {
-                        executor.execute { handleClient(socket) }
-                    } catch (rejected: RejectedExecutionException) {
-                        activeConnections.decrementAndGet()
+                    val lease = sessionBudget.tryAcquire()
+                    if (lease == null) {
                         badConnections.incrementAndGet()
-                        clients -= socket
-                        lastMessage = "Слишком много соединений: новое соединение отклонено"
+                        lastMessage = "Лимит активных сессий: новое соединение отклонено"
+                        runCatching { socket.close() }
+                        continue
+                    }
+                    var registered = false
+                    try {
+                        socket.soTimeout = initialHandshakeTimeoutMs
+                        socket.tcpNoDelay = true
+                        socket.keepAlive = true
+                        socket.receiveBufferSize = bufferSize
+                        socket.sendBufferSize = bufferSize
+                        clients += socket
+                        totalConnections.incrementAndGet()
+                        activeConnections.incrementAndGet()
+                        registered = true
+                        executor.execute { handleClient(socket, lease) }
+                    } catch (error: Exception) {
+                        if (registered) {
+                            activeConnections.decrementAndGet()
+                            clients -= socket
+                        }
+                        badConnections.incrementAndGet()
+                        lastMessage = "Не удалось обработать новое соединение: ${error.message ?: "лимит ресурсов"}"
+                        lease.close()
                         runCatching { socket.close() }
                     }
                 } catch (ignored: Exception) {
@@ -206,7 +219,7 @@ class TelegramProxy(
         executor.shutdownNow()
     }
 
-    private fun handleClient(client: Socket) {
+    private fun handleClient(client: Socket, lease: ProxySessionBudget.Lease) {
         try {
             BufferedInputStream(client.getInputStream()).use { rawIn ->
                 BufferedOutputStream(client.getOutputStream()).use { rawOut ->
@@ -243,6 +256,7 @@ class TelegramProxy(
             activeConnections.decrementAndGet()
             clients -= client
             runCatching { client.close() }
+            lease.close()
         }
     }
 
