@@ -146,7 +146,7 @@ internal class H2ReplayWindow(
         if (!ticket.replay) return
         val removed = ticket.entry.pending.remove(ticket.id) ?: return
         if (removed.replay) pendingReplays = (pendingReplays - 1).coerceAtLeast(0)
-        if (removed.sentAt == 0L && ticket.entry.lastAttemptAt == ticket.reservedAt) {
+        if (removed.sentAt == null && ticket.entry.lastAttemptAt == ticket.reservedAt) {
             ticket.entry.attempts = (ticket.entry.attempts - 1).coerceAtLeast(0)
             ticket.entry.lastAttemptAt = 0L
         }
