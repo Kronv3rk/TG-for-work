@@ -73,6 +73,21 @@ class TelegramProxy(
         isActive = { networkOptions.wsPoolActive },
         background = { poolExecutor.execute(it) }
     )
+    // Reuses upstream's Cloudflare Worker WebSockets, but only keeps one idle
+    // socket per DC while on Wi-Fi to avoid radio wakeups and battery drain.
+    private val workerPool = WorkerPool(
+        size = 1,
+        connector = { dcId, destination, domain ->
+            val encodedIp = java.net.URLEncoder.encode(destination, "UTF-8")
+            RawWebSocket.connect(
+                domain, domain, WsPool.CONNECT_TIMEOUT_MS,
+                path = "/apiws?dst=$encodedIp&dc=$dcId"
+            )
+        },
+        isOpen = RawWebSocket::isOpen,
+        isActive = { networkOptions.wsPoolActive && options.cfWorkerEnabled },
+        background = { poolExecutor.execute(it) }
+    )
 
     @Volatile
     private var poolMaintenance: ScheduledExecutorService? = null
@@ -112,6 +127,7 @@ class TelegramProxy(
     private fun invalidateNetworkRoutes() {
         routePlanner.resetNetworkState()
         wsPool.clear()
+        workerPool.clear()
         for (client in clients) runCatching { client.close() }
         ConnectionLog.info("Сеть изменилась: старые подключения закрыты, маршруты пересоздаются")
     }
@@ -130,7 +146,7 @@ class TelegramProxy(
         server.reuseAddress = true
         serverSocket = server
         if (options.wsPoolEnabled && poolMaintenance == null) {
-            poolMaintenance = WsPool.startMaintenance(wsPool)
+            poolMaintenance = WsPool.startMaintenance(wsPool, workerPool::maintain)
         }
         lastMessage = "Прокси слушает ${options.host}:${options.port}"
         // Run accept on a dedicated thread so client handlers and their download
@@ -215,6 +231,7 @@ class TelegramProxy(
         poolMaintenance?.shutdownNow()
         poolMaintenance = null
         wsPool.close()
+        workerPool.close()
         poolExecutor.shutdownNow()
         executor.shutdownNow()
     }
@@ -524,7 +541,19 @@ class TelegramProxy(
         crypto: CryptoContext
     ): Boolean {
         val dst = directIp(dcId) ?: return false
-        for ((attempt, workerDomain) in options.cfWorkerDomains.take(MAX_CF_ATTEMPTS).withIndex()) {
+        val workerDomains = options.cfWorkerDomains.take(MAX_CF_ATTEMPTS)
+        val pooled = workerPool.get(dcId, dst, workerDomains)
+        if (pooled != null) {
+            workerConnections.incrementAndGet()
+            routePlanner.markConnected(RouteMethod.WORKER, dcId, isMedia, 0)
+            ConnectionLog.connected(RouteMethod.WORKER, dcId, isMedia, 0, "пул Worker")
+            relayOverWebSocket(
+                RouteMethod.WORKER, dcId, isMedia, client, clientIn,
+                clientOut, pooled, relayInit, crypto, splitter = null, fromPool = true
+            )
+            return true
+        }
+        for ((attempt, workerDomain) in workerDomains.withIndex()) {
             val path = "/apiws?dst=$dst&dc=$dcId"
             val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WORKER, dcId, isMedia, attempt)
             val connectStart = System.currentTimeMillis()
