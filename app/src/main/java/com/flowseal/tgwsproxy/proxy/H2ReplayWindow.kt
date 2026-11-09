@@ -93,8 +93,10 @@ internal class H2ReplayWindow(
     }
 
     @Synchronized
-    fun markProgress(ticket: Ticket) {
-        if (ticket.entry.pending.containsKey(ticket.id)) lastProgressAt = clock()
+    fun markProgress(ticket: Ticket? = null) {
+        if (ticket == null || ticket.entry.pending.containsKey(ticket.id)) {
+            lastProgressAt = clock()
+        }
     }
 
     @Synchronized
@@ -155,10 +157,10 @@ internal class H2ReplayWindow(
     /** Returns false when this is a duplicate response to the same native packet. */
     @Synchronized
     fun acceptReply(ticket: Ticket?, reply: ByteArray): Boolean {
+        lastProgressAt = clock()
         if (ticket == null) return true
         val entry = ticket.entry
         val replyId = reply.copyOfRange(0, minOf(24, reply.size))
-        lastProgressAt = clock()
         val previous = entry.replyId
         if (previous != null && previous.contentEquals(replyId)) return false
         entry.replyId = replyId
