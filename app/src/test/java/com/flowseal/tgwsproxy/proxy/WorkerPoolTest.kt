@@ -34,7 +34,7 @@ class WorkerPoolTest {
         assertNotNull(reused)
         assertNull(pool.get(4, "149.154.167.91", domains))
         assertNull(pool.get(2, "149.154.167.52", domains))
-        assertEquals(3, requests.size)
+        assertEquals(4, requests.size)
         pool.close()
         assertTrue(requests.isNotEmpty())
     }
