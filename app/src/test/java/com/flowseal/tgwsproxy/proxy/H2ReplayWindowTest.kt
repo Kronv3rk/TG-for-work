@@ -227,6 +227,7 @@ class H2ReplayWindowTest {
         now += 1_000L
         assertNull(window.nextReplayCandidate())
         assertTrue(window.retire(olderTicket))
+        assertFalse(window.acceptReply(olderTicket, packet(3)))
         assertSame(older, window.nextReplayCandidate())
         val replay = window.reserveReplay(older)!!
         window.complete(replay)
