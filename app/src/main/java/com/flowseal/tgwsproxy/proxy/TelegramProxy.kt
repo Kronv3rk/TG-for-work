@@ -820,11 +820,11 @@ class TelegramProxy(
                     val plain = crypto.clientDecrypt.update(buffer, 0, read)
                     val encrypted = crypto.telegramEncrypt.update(plain)
                     val parts = splitter?.split(encrypted) ?: listOf(encrypted)
-                    for (part in parts) {
-                        if (part.isNotEmpty()) ws.sendBinary(part)
-                    }
+                    if (parts.any { it.isNotEmpty() }) ws.sendBinaryBatch(parts)
                 }
-                splitter?.flush()?.forEach { if (it.isNotEmpty()) ws.sendBinary(it) }
+                splitter?.flush()?.let { tail ->
+                    if (tail.any { it.isNotEmpty() }) ws.sendBinaryBatch(tail)
+                }
             } finally {
                 done.set(1)
                 runCatching { ws.close() }
