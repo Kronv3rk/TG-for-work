@@ -67,9 +67,21 @@ class TelegramProxy(
 
     /** Pool refills dial on their own threads so they never take a client's slot in [executor]. */
     private val poolExecutor = Executors.newCachedThreadPool(namedDaemonThreads("tg-ws-pool"))
+    private val frontingDialer = FrontingDialer(
+        normal = { host: String, domain: String ->
+            RawWebSocket.connect(host, domain, WsPool.CONNECT_TIMEOUT_MS)
+        },
+        fronted = { host: String, domain: String ->
+            RawWebSocket.connect(
+                host, domain, WsPool.CONNECT_TIMEOUT_MS - 1_000,
+                sni = options.frontingSni.trim()
+            )
+        },
+        enabled = { options.frontingEnabled && options.frontingSni.isNotBlank() }
+    )
     private val wsPool = WsPool(
         size = WsPool.DEFAULT_SIZE,
-        connector = { host, domain -> RawWebSocket.connect(host, domain, WsPool.CONNECT_TIMEOUT_MS) },
+        connector = frontingDialer::connect,
         isOpen = RawWebSocket::isOpen,
         isTargetBlocked = { routePlanner.isTargetBlocked(it) },
         isActive = { networkOptions.wsPoolActive },
@@ -131,6 +143,7 @@ class TelegramProxy(
 
     private fun invalidateNetworkRoutes() {
         routePlanner.resetNetworkState()
+        frontingDialer.reset()
         wsPool.clear()
         workerPool.clear()
         h2Transport?.resetNetwork()
@@ -391,11 +404,13 @@ class TelegramProxy(
         if (networkOptions.wsPoolActive) {
             val pooled = wsPool.get(WsPool.Key(dcId, isMedia), host, domains)
             if (pooled != null) {
-                wsConnections.incrementAndGet()
-                // No dial happened, so there is no latency sample to feed the route health.
-                routePlanner.markConnected(RouteMethod.WEBSOCKET, dcId, isMedia)
-                ConnectionLog.connected(RouteMethod.WEBSOCKET, dcId, isMedia, 0L, "пул · via $host")
-                relayOverWebSocket(RouteMethod.WEBSOCKET, dcId, isMedia, client, clientIn, clientOut, pooled, relayInit, crypto, splitter, fromPool = true)
+                val method = if (pooled.isFronted) RouteMethod.FRONTING else RouteMethod.WEBSOCKET
+                if (pooled.isFronted) frontingConnections.incrementAndGet()
+                else wsConnections.incrementAndGet()
+                // Retain the selected TLS mode in the diagnostic and route score.
+                routePlanner.markConnected(method, dcId, isMedia)
+                ConnectionLog.connected(method, dcId, isMedia, 0L, "пул · via $host")
+                relayOverWebSocket(method, dcId, isMedia, client, clientIn, clientOut, pooled, relayInit, crypto, splitter, fromPool = true)
                 return true
             }
         }
