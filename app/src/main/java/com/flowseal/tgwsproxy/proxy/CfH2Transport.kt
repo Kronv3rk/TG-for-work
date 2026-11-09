@@ -79,7 +79,7 @@ internal class CfH2Transport(
         val receiving: AtomicBoolean = AtomicBoolean(false)
     )
 
-    private data class RotationCandidate(
+    internal data class RotationCandidate(
         val channel: Channel,
         val call: Call,
         val sentAtMs: Long,
@@ -382,8 +382,8 @@ internal class CfH2Transport(
                 System.nanoTime() + TimeUnit.SECONDS.toNanos(REQUEST_TIMEOUT_SECONDS)
             } else System.nanoTime()
             while (!closed.get()) {
-                if (!acquireCapacity(requests, deadline, laneWide = false)) return false
-                if (!acquireCapacity(lane.requests, deadline, laneWide = true)) {
+                if (!acquireCapacity(requests, deadline, laneWide = false, wait = wait)) return false
+                if (!acquireCapacity(lane.requests, deadline, laneWide = true, wait = wait)) {
                     requests.release()
                     return false
                 }
@@ -396,7 +396,7 @@ internal class CfH2Transport(
                 requests.release()
                 lane.requests.release()
                 if (!wait || closed.get() || System.nanoTime() >= deadline) return false
-                rotateOldestPendingRequest(laneWide = true)
+                rotateOldestPendingRequest(laneWide = !laneReserved)
                 try {
                     TimeUnit.MILLISECONDS.sleep(100L)
                 } catch (_: InterruptedException) {
@@ -410,8 +410,10 @@ internal class CfH2Transport(
         private fun acquireCapacity(
             semaphore: Semaphore,
             deadline: Long,
-            laneWide: Boolean
+            laneWide: Boolean,
+            wait: Boolean
         ): Boolean {
+            if (!wait) return semaphore.tryAcquire()
             while (!closed.get()) {
                 val remaining = deadline - System.nanoTime()
                 if (remaining <= 0L) return false
@@ -437,7 +439,7 @@ internal class CfH2Transport(
             return candidate.channel.rotate(candidate.call, REPLAY_REQUEST_MS)
         }
 
-        private fun rotationCandidates(): List<RotationCandidate> {
+        internal fun rotationCandidates(): List<RotationCandidate> {
             val now = System.nanoTime() / 1_000_000L
             return pendingCalls.mapNotNull { (call, record) ->
                 val sent = record.sentAtMs.get()
@@ -447,9 +449,9 @@ internal class CfH2Transport(
             }
         }
 
-        private fun belongsToLane(target: Lane): Boolean = lane === target
+        internal fun belongsToLane(target: Lane): Boolean = lane === target
 
-        private fun rotate(call: Call, minimumAgeMs: Long): Boolean {
+        internal fun rotate(call: Call, minimumAgeMs: Long): Boolean {
             val record = pendingCalls[call] ?: return false
             val sent = record.sentAtMs.get()
             val age = System.nanoTime() / 1_000_000L - sent
