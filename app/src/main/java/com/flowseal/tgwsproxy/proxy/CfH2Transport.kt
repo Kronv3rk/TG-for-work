@@ -264,7 +264,7 @@ internal class CfH2Transport(
                 }
                 call.enqueue(object : Callback {
                     override fun onFailure(call: Call, error: IOException) {
-                        if (!call.isCanceled) fail(error)
+                        if (!call.isCanceled()) fail(error)
                         complete(call)
                     }
 
