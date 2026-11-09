@@ -164,6 +164,21 @@ class H2ReplayWindowTest {
         assertTrue(window.reserveReplay(newEntry) != null)
     }
 
+    @Test
+    fun retriesTheLatestPacketAfterAnEmptyLongPollResponse() {
+        var now = 1_000L
+        val window = H2ReplayWindow(clock = { now })
+        val entry = window.remember(packet(1))!!
+        val original = window.registerOriginal(entry)
+        window.markSent(original)
+        window.markReceiving(original)
+        window.complete(original) // HTTP 200 with an empty body
+        now += 999L
+        assertNull(window.nextReplayCandidate())
+        now += 1L
+        assertSame(entry, window.nextReplayCandidate())
+    }
+
     private fun packet(key: Int, size: Int = 32, authKey: Int = key): ByteArray =
         ByteArray(size).also {
             it[0] = authKey.toByte()
