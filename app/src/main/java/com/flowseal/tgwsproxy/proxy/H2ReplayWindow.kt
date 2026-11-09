@@ -39,7 +39,8 @@ internal class H2ReplayWindow(
     internal class Ticket internal constructor(
         internal val id: Long,
         internal val entry: Entry,
-        internal val replay: Boolean
+        internal val replay: Boolean,
+        internal val reservedAt: Long = 0L
     )
 
     private val entries = ArrayList<Entry>()
@@ -117,13 +118,27 @@ internal class H2ReplayWindow(
     @Synchronized
     fun reserveReplay(entry: Entry): Ticket? {
         if (pendingReplays >= maxConcurrentReplays || nextReplayCandidate() !== entry) return null
+        val now = clock()
         entry.attempts += 1
-        entry.lastAttemptAt = clock()
+        entry.lastAttemptAt = now
         pendingReplays += 1
-        return registerLocked(entry, replay = true)
+        val ticket = registerLocked(entry, replay = true)
+        return Ticket(ticket.id, ticket.entry, replay = true, reservedAt = now)
     }
 
     /** Returns false when this is a duplicate response to the same native packet. */
+    /** Releases a replay reservation that never reached the network. */
+    @Synchronized
+    fun cancelReplay(ticket: Ticket) {
+        if (!ticket.replay) return
+        val removed = ticket.entry.pending.remove(ticket.id) ?: return
+        if (removed.replay) pendingReplays = (pendingReplays - 1).coerceAtLeast(0)
+        if (removed.sentAt == 0L && ticket.entry.lastAttemptAt == ticket.reservedAt) {
+            ticket.entry.attempts = (ticket.entry.attempts - 1).coerceAtLeast(0)
+            ticket.entry.lastAttemptAt = 0L
+        }
+    }
+
     @Synchronized
     fun acceptReply(ticket: Ticket?, reply: ByteArray): Boolean {
         if (ticket == null) return true
