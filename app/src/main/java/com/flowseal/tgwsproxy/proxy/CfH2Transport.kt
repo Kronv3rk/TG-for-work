@@ -369,8 +369,12 @@ internal class CfH2Transport(
 
         private fun dispatchReplayIfDue() {
             if (closed.get()) return
-            val entry = replayWindow.nextReplayCandidate() ?: return
-            val ticket = replayWindow.reserveReplay(entry) ?: return
+            // Any in-flight request not represented in the replay history
+            // blocks the latest-idle poll, while overdue tracked requests can
+            // still be replayed independently.
+            val allowIdlePoll = pending.get() == 0
+            val entry = replayWindow.nextReplayCandidate(allowIdlePoll) ?: return
+            val ticket = replayWindow.reserveReplay(entry, allowIdlePoll) ?: return
             runCatching {
                 enqueue(replayWindow.body(entry), ticket, replay = true, waitForCapacity = false)
             }.onFailure { error ->
