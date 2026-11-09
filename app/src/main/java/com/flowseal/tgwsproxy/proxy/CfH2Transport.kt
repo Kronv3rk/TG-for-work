@@ -259,6 +259,7 @@ internal class CfH2Transport(
                             response.use {
                                 val result = readBoundedReply(response, lane) {
                                     lastProgress.set(System.currentTimeMillis())
+                                    if (ticket != null) replayWindow.markProgress(ticket)
                                 }
                                 var queued = false
                                 if (result.body.isNotEmpty() && replayWindow.acceptReply(ticket, result.body)) {
