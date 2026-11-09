@@ -3,8 +3,10 @@ package com.flowseal.tgwsproxy.proxy
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
 import okio.Buffer
@@ -100,17 +102,17 @@ class CfH2TransportTest {
     @Test(timeout = 15_000)
     fun reusesOnePreflightedOriginLaneAcrossTelegramMediaChannels() {
         createServer(http2 = true).use { fixture ->
-            fixture.server.enqueue(MockResponse().setResponseCode(200))
             val firstReply = ByteArray(24) { 1 }
             val secondReply = ByteArray(24) { 2 }
-            fixture.server.enqueue(
-                MockResponse().addHeader("Content-Type", "application/octet-stream")
-                    .setBody(Buffer().write(firstReply))
-            )
-            fixture.server.enqueue(
-                MockResponse().addHeader("Content-Type", "application/octet-stream")
-                    .setBody(Buffer().write(secondReply))
-            )
+            fixture.server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (request.method == "HEAD") return MockResponse().setResponseCode(200)
+                    val body = request.body.readByteArray()
+                    val reply = if (body.size > 8 && body[8].toInt() == 2) secondReply else firstReply
+                    return MockResponse().addHeader("Content-Type", "application/octet-stream")
+                        .setBody(Buffer().write(reply))
+                }
+            }
             val transport = CfH2Transport(fixture.client)
             try {
                 val endpoint = "localhost:${fixture.server.port}"
