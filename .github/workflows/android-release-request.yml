@@ -35,6 +35,7 @@ jobs:
           fi
           TAG="$(tr -d '\r\n' < "$REQUEST")"
           FILE_TAG="$(basename "$REQUEST" .request)"
+          printf '::notice::Release request path=%q contentTag=%q filenameTag=%q\\n' "$REQUEST" "$TAG" "$FILE_TAG"
           if [[ "$TAG" != "$FILE_TAG" ]]; then
             echo "::error::Release request content must match its filename" >&2
             exit 1
