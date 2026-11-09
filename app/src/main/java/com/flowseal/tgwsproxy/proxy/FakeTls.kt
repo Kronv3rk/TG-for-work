@@ -36,7 +36,10 @@ class FakeTls(private val secret: ByteArray, private val maskingDomain: String) 
                 val recordBody = rawInput.readExact(recordLength)
                 val clientHello = tlsHeader + recordBody
                 val result = verifyClientHello(clientHello)
-                if (result == null) {
+                // A valid Hello repeated within the timestamp window is a replay
+                // probe. Behave exactly like the camouflage website for both invalid
+                // and replayed requests (upstream fix #1532).
+                if (result == null || !replayCache.firstSeen(result.clientRandom)) {
                     proxyToMaskingDomain(rawInput, rawOutput, clientHello)
                     return null
                 }
@@ -144,6 +147,7 @@ class FakeTls(private val secret: ByteArray, private val maskingDomain: String) 
     private data class VerifyResult(val clientRandom: ByteArray, val sessionId: ByteArray)
 
     companion object {
+        private val replayCache = FakeTlsReplayCache()
         private val maskingForwardingGate = ConnectionGate(8)
         const val TLS_RECORD_HANDSHAKE = 0x16
         private const val TLS_RECORD_APPDATA = 0x17
