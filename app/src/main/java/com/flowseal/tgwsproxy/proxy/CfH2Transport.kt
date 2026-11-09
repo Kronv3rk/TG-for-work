@@ -95,9 +95,12 @@ internal class CfH2Transport(
     private val failedUntil = ConcurrentHashMap<String, Long>()
     private val channels = ConcurrentHashMap.newKeySet<Channel>()
     private val closed = AtomicBoolean(false)
+    private val stateLock = Any()
+    private val networkGeneration = AtomicLong(0L)
 
     fun open(hosts: List<String>): Channel? {
         if (closed.get()) return null
+        val generation = networkGeneration.get()
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(SETUP_TIMEOUT_SECONDS)
         for (host in hosts.take(MAX_CONNECT_ATTEMPTS)) {
             if (System.currentTimeMillis() < (failedUntil[host] ?: 0L)) continue
@@ -106,9 +109,7 @@ internal class CfH2Transport(
             // already ALPN-verified OkHttp connection instead of HEAD-probing
             // Cloudflare for every Telegram media session.
             val existing = lanes[host]
-            if (existing != null) {
-                return Channel(host, existing).also { channels.add(it) }
-            }
+            if (existing != null) return registerChannel(host, existing, generation)
 
             val preflight = runCatching {
                 val remaining = deadline - System.nanoTime()
@@ -128,18 +129,27 @@ internal class CfH2Transport(
                 if (System.nanoTime() >= deadline) return null
                 continue
             }
-            val lane = lanes.computeIfAbsent(host) { Lane() }
-            return Channel(host, lane).also { channels.add(it) }
+            return registerChannel(host, Lane(), generation)
         }
         return null
     }
 
+    private fun registerChannel(host: String, proposedLane: Lane, generation: Long): Channel? =
+        synchronized(stateLock) {
+            if (closed.get() || generation != networkGeneration.get()) return@synchronized null
+            val lane = lanes.computeIfAbsent(host) { proposedLane }
+            Channel(host, lane).also { channels.add(it) }
+        }
+
     /** Prevent old TLS sockets and pending responses crossing a network handover. */
     fun resetNetwork() {
-        for (channel in channels.toList()) channel.close()
-        failedUntil.clear()
-        lanes.clear()
-        client.connectionPool.evictAll()
+        synchronized(stateLock) {
+            networkGeneration.incrementAndGet()
+            for (channel in channels.toList()) channel.close()
+            failedUntil.clear()
+            lanes.clear()
+            client.connectionPool.evictAll()
+        }
     }
 
     override fun close() {
