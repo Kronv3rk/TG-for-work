@@ -51,10 +51,23 @@ class WebSocketFrameWriterTest {
         assertEquals(payload.size + 14, output.bytes)
     }
 
+    @Test
+    fun batchesMultiplePacketsIntoOneFlushWithoutChangingFrameBoundaries() {
+        val output = TrackingOutputStream()
+        val parts = listOf(ByteArray(40) { 1 }, byteArrayOf(), ByteArray(300) { 2 })
+        WebSocketFrameWriter.writeBinaryBatch(output, parts, SecureRandom())
+        assertEquals(0, output.flushCount)
+        output.flush()
+        assertEquals(1, output.flushCount)
+        assertEquals(40 + 6 + 300 + 8, output.bytes)
+    }
+
     private class TrackingOutputStream : OutputStream() {
         var largestWrite = 0
         var calls = 0
         var bytes = 0
+        var flushCount = 0
+        override fun flush() { flushCount++ }
         override fun write(value: Int) { bytes++ }
         override fun write(buffer: ByteArray, offset: Int, length: Int) {
             largestWrite = maxOf(largestWrite, length)
