@@ -211,7 +211,9 @@ internal class CfH2Transport(
             }
 
             val reserved = lane.reservePending(body.size)
-            if (closed.get() || !reserved || pendingBytes.get() + body.size > MAX_CHANNEL_BYTES) {
+            val channelReserved = reserved && reserveChannelPending(body.size)
+            if (closed.get() || !reserved || !channelReserved) {
+                if (channelReserved) pendingBytes.addAndGet(-body.size)
                 if (reserved) lane.releasePending(body.size)
                 requests.release()
                 lane.requests.release()
@@ -219,8 +221,6 @@ internal class CfH2Transport(
                 if (waitForCapacity) throw IOException("H2 pending byte budget exceeded")
                 return false
             }
-
-            pendingBytes.addAndGet(body.size)
             pending.incrementAndGet()
             lastProgress.set(System.currentTimeMillis())
             var call: Call? = null
@@ -342,6 +342,14 @@ internal class CfH2Transport(
             }
         }
 
+        private fun reserveChannelPending(bytes: Int): Boolean {
+            while (true) {
+                val current = pendingBytes.get()
+                if (current + bytes > MAX_CHANNEL_BYTES) return false
+                if (pendingBytes.compareAndSet(current, current + bytes)) return true
+            }
+        }
+
         private fun complete(call: Call) {
             val record = pendingCalls.remove(call) ?: return
             record.ticket?.let(replayWindow::complete)
@@ -376,6 +384,7 @@ internal class CfH2Transport(
                 transportError.compareAndSet(0, error.nativeCode)
             } else {
                 failure.compareAndSet(null, error)
+                failedUntil[host] = System.currentTimeMillis() + DOMAIN_COOLDOWN_MS
             }
             close()
         }
