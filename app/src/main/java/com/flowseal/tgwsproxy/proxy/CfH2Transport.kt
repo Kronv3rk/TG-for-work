@@ -431,6 +431,8 @@ internal class CfH2Transport(
             requests.release()
         }
 
+        internal fun abort(error: IOException) = fail(error)
+
         private fun fail(error: IOException) {
             if (closed.get()) return
             if (error is H2TransportError) {
