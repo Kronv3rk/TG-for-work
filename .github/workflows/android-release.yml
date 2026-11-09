@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "release/v1.10.0.request"
+      - "release/v1.11.0.request"
     tags:
       - "v*"
   workflow_dispatch:
@@ -51,7 +51,7 @@ jobs:
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             TAG="$INPUT_TAG"
           elif [[ "$REF_TYPE" == "branch" && "$REF_NAME" == "main" ]]; then
-            TAG="$(cat release/v1.10.0.request)"
+            TAG="$(cat release/v1.11.0.request)"
           else
             TAG="$REF_NAME"
           fi
@@ -187,7 +187,7 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/new-signing.txt"
 
           mkdir -p "$RUNNER_TEMP/previous"
-          gh release download v1.9.0 --pattern '*-release-signed.apk' --dir "$RUNNER_TEMP/previous"
+          gh release download v1.10.1 --pattern '*-release-signed.apk' --dir "$RUNNER_TEMP/previous"
           PREVIOUS="$(find "$RUNNER_TEMP/previous" -maxdepth 1 -name '*.apk' | head -n 1)"
           if [[ -z "$PREVIOUS" || ! -f "$PREVIOUS" ]]; then
             echo "::error::Previous release APK is missing" >&2
@@ -197,11 +197,11 @@ jobs:
           NEW_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/new-signing.txt" | head -n 1)"
           OLD_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/old-signing.txt" | head -n 1)"
           if [[ -z "$NEW_CERT" || -z "$OLD_CERT" || "$NEW_CERT" != "$OLD_CERT" ]]; then
-            echo "::error::Release signing certificate does not match v1.9.0. Existing users cannot update." >&2
+            echo "::error::Release signing certificate does not match v1.10.1. Existing users cannot update." >&2
             exit 1
           fi
           (cd "$RUNNER_TEMP" && sha256sum "$(basename "$APK")") > "$APK.sha256"
-          echo "APK signature verified and compatible with v1.9.0"
+          echo "APK signature verified and compatible with v1.10.1"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -222,16 +222,16 @@ jobs:
           APK="${{ steps.build.outputs.asset_path }}"
           NOTES="$RUNNER_TEMP/release-notes.md"
           cat > "$NOTES" <<'EOF'
-          TG-for-work 1.10.0
+          TG-for-work 1.11.0
 
-          - Новый интерфейс: читаемые состояния прокси, расширяемый журнал и тёмная тема.
-          - Безопаснее WebSocket и TLS: проверка рукопожатия, кадров и закрытия сокетов.
-          - Восстановление после смены Wi-Fi и мобильной сети без перезапуска локального сервера.
-          - Оптимизация Wi-Fi Lock и ограничение фоновой маскирующей нагрузки.
-          - Исправлено копирование ссылки без запуска прокси и сохранение настроек.
-          - Контрольная сумма SHA-256 и проверка релизной подписи с версией 1.9.0.
+          - Перенесена защита Fake TLS от повторных ClientHello и добавлен пул соединений собственного Cloudflare Worker.
+          - Добавлен экспериментальный Cloudflare HTTP/2 для медиатрафика: параллельные POST /api, TLS/ALPN и общий пул соединений.
+          - Добавлено ограниченное восстановление зависших MTProto-запросов, до трёх повторов и подавление поздних дублирующих ответов.
+          - Ограничены очереди и память HTTP/2-каналов; ошибки Cloudflare передаются в формате MTProto.
+          - HTTP/2 выключен по умолчанию и требует включённого Cloudflare. При неудачном preflight используются прежние маршруты.
+          - Сохранены прежние applicationId, формат tg://proxy, пользовательские настройки и сертификат подписи.
 
-          Для установки поверх предыдущих релизов используется совместимый сертификат.
+          HTTP/2 проверен на локальном TLS/ALPN-сервере. Проверка на реальных Cloudflare /api и физических Android-устройствах остаётся отдельным этапом; прирост скорости не гарантируется.
           EOF
           gh release create "$TAG" "$APK" "$APK.sha256" \
             --title "TG-for-work $TAG" \
