@@ -101,7 +101,7 @@
     <string name="settings_invalid_port">Порт должен быть числом от 1 до 65535</string>
     <string name="settings_invalid_dcip">Некорректная пара DC:IP</string>
     <string name="settings_h2_media_label">Экспериментальный HTTP/2 для медиа через Cloudflare</string>
-    <string name="settings_h2_media_hint">По умолчанию выключен. Мультиплексирует запросы загрузки медиа через HTTP/2; при недоступности используется обычный WebSocket. Включайте для проверки и сравнения скорости. До испытаний на реальных устройствах не рекомендуется для постоянной работы.</string>
+    <string name="settings_h2_media_hint">Требуется включённый Cloudflare. По умолчанию выключен. Передаёт медиапакеты параллельными запросами HTTP/2; если HTTP/2 не согласован, приложение использует прежние маршруты. Экспериментальный режим: совместимость с реальными Cloudflare-серверами и телефонами ещё проверяется.</string>
     <string name="settings_pool_label">Держать WebSocket-соединения наготове (только Wi-Fi)</string>
     <string name="settings_pool_hint">Чаты и медиа открываются быстрее. Соединения держатся только для используемых дата-центров и закрываются через 5 минут без активности.</string>
     <string name="settings_fronting_label">Domain fronting: SNI (экспериментально)</string>

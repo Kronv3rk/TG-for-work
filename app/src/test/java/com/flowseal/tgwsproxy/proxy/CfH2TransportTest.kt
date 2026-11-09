@@ -1,10 +1,13 @@
 package com.flowseal.tgwsproxy.proxy
 
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
 import okio.Buffer
@@ -26,6 +29,14 @@ class CfH2TransportTest {
         }
     }
 
+    private fun awaitRequestCount(server: MockWebServer, expected: Int) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (server.requestCount < expected && System.nanoTime() < deadline) {
+            Thread.sleep(50L)
+        }
+        assertEquals(expected, server.requestCount)
+    }
+
     private fun createServer(http2: Boolean): LocalServer {
         val certificate = HeldCertificate.Builder()
             .addSubjectAlternativeName("localhost")
@@ -44,9 +55,13 @@ class CfH2TransportTest {
         val client = OkHttpClient.Builder()
             .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager)
             .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
-            .callTimeout(6, TimeUnit.SECONDS)
+            .dispatcher(okhttp3.Dispatcher().apply {
+                maxRequests = 64
+                maxRequestsPerHost = 64
+            })
+            .callTimeout(12, TimeUnit.SECONDS)
             .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
             .build()
         return LocalServer(server, client)
     }
@@ -97,20 +112,59 @@ class CfH2TransportTest {
         }
     }
 
+    @Test(timeout = 35_000)
+    fun rotatesOldestUnansweredRequestWhenChannelUploadSlotsAreFull() {
+        createServer(http2 = true).use { fixture ->
+            fixture.server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (request.method == "HEAD") return MockResponse().setResponseCode(200)
+                    // Long enough to hit the three-second rotation threshold,
+                    // short enough that MockWebServer can shut down normally.
+                    return MockResponse().setHeadersDelay(5, TimeUnit.SECONDS)
+                        .addHeader("Content-Type", "application/octet-stream")
+                        .setBody(Buffer().write(ByteArray(24) { 7 }))
+                }
+            }
+            val transport = CfH2Transport(fixture.client)
+            val executor = Executors.newSingleThreadExecutor()
+            try {
+                val channel = transport.open(listOf("localhost:${fixture.server.port}"))!!
+                repeat(8) { index ->
+                    channel.send(ByteArray(24).also {
+                        it[0] = 1
+                        it[8] = (index + 1).toByte()
+                    })
+                }
+                awaitRequestCount(fixture.server, 9)
+                val ninth = executor.submit<Boolean> {
+                    channel.send(ByteArray(24).also { it[0] = 1; it[8] = 9 })
+                    true
+                }
+                assertTrue("ninth upload should proceed after retiring an overdue request",
+                    ninth.get(4, TimeUnit.SECONDS))
+                awaitRequestCount(fixture.server, 10)
+                channel.close()
+            } finally {
+                executor.shutdownNow()
+                transport.close()
+            }
+        }
+    }
+
     @Test(timeout = 15_000)
     fun reusesOnePreflightedOriginLaneAcrossTelegramMediaChannels() {
         createServer(http2 = true).use { fixture ->
-            fixture.server.enqueue(MockResponse().setResponseCode(200))
             val firstReply = ByteArray(24) { 1 }
             val secondReply = ByteArray(24) { 2 }
-            fixture.server.enqueue(
-                MockResponse().addHeader("Content-Type", "application/octet-stream")
-                    .setBody(Buffer().write(firstReply))
-            )
-            fixture.server.enqueue(
-                MockResponse().addHeader("Content-Type", "application/octet-stream")
-                    .setBody(Buffer().write(secondReply))
-            )
+            fixture.server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (request.method == "HEAD") return MockResponse().setResponseCode(200)
+                    val body = request.body.readByteArray()
+                    val reply = if (body.size > 8 && body[8].toInt() == 2) secondReply else firstReply
+                    return MockResponse().addHeader("Content-Type", "application/octet-stream")
+                        .setBody(Buffer().write(reply))
+                }
+            }
             val transport = CfH2Transport(fixture.client)
             try {
                 val endpoint = "localhost:${fixture.server.port}"

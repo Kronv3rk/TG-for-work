@@ -73,7 +73,17 @@ internal class CfH2Transport(
 
     private data class PendingCall(
         val bytes: Int,
-        val ticket: H2ReplayWindow.Ticket?
+        val ticket: H2ReplayWindow.Ticket?,
+        val replay: Boolean,
+        val sentAtMs: AtomicLong = AtomicLong(Long.MIN_VALUE),
+        val receiving: AtomicBoolean = AtomicBoolean(false)
+    )
+
+    internal data class RotationCandidate(
+        val channel: Channel,
+        val call: Call,
+        val sentAtMs: Long,
+        val replay: Boolean
     )
 
     private data class QueuedReply(
@@ -172,6 +182,7 @@ internal class CfH2Transport(
         private val transportErrorDelivered = AtomicBoolean(false)
         private val requests = Semaphore(MAX_CHANNEL_REQUESTS)
         private val pendingCalls = ConcurrentHashMap<Call, PendingCall>()
+        private val intentionallyCancelled = ConcurrentHashMap.newKeySet<Call>()
         private val pending = AtomicInteger(0)
         private val queuedReplies = ArrayBlockingQueue<QueuedReply>(MAX_CHANNEL_REQUESTS)
         private val replyLock = Any()
@@ -217,43 +228,25 @@ internal class CfH2Transport(
                 throw IOException("Invalid H2 upload packet")
             }
 
-            val channelAcquired = acquireCapacity(requests, waitForCapacity)
-            if (!channelAcquired) {
+            if (!acquireUploadSlot(body.size, waitForCapacity)) {
                 releaseTicket(ticket, replay)
-                if (waitForCapacity) throw if (closed.get()) IOException("H2 channel closed while waiting for capacity")
-                    else SocketTimeoutException("H2 channel request budget exhausted")
-                return false
-            }
-
-            val laneAcquired = acquireCapacity(lane.requests, waitForCapacity)
-            if (!laneAcquired) {
-                requests.release()
-                releaseTicket(ticket, replay)
-                if (waitForCapacity) throw if (closed.get()) IOException("H2 channel closed while waiting for lane capacity")
-                    else SocketTimeoutException("H2 lane request budget exhausted")
-                return false
-            }
-
-            val reserved = lane.reservePending(body.size)
-            val channelReserved = reserved && reserveChannelPending(body.size)
-            if (closed.get() || !reserved || !channelReserved) {
-                if (channelReserved) pendingBytes.addAndGet(-body.size)
-                if (reserved) lane.releasePending(body.size)
-                requests.release()
-                lane.requests.release()
-                releaseTicket(ticket, replay)
-                if (waitForCapacity) throw IOException("H2 pending byte budget exceeded")
+                if (waitForCapacity) {
+                    if (closed.get()) throw IOException("H2 channel closed while waiting for capacity")
+                    throw SocketTimeoutException("H2 channel/lane capacity budget exhausted")
+                }
                 return false
             }
             pending.incrementAndGet()
             lastProgress.set(System.currentTimeMillis())
             var call: Call? = null
+            val record = PendingCall(body.size, ticket, replay)
             try {
                 val requestBody = object : RequestBody() {
                     override fun contentType() = "application/octet-stream".toMediaType()
                     override fun contentLength(): Long = body.size.toLong()
                     override fun writeTo(sink: BufferedSink) {
                         sink.write(body)
+                        record.sentAtMs.set(System.nanoTime() / 1_000_000L)
                         if (ticket != null) replayWindow.markSent(ticket)
                     }
                 }
@@ -263,7 +256,7 @@ internal class CfH2Transport(
                     .post(requestBody)
                     .build()
                 call = client.newCall(request)
-                pendingCalls[call] = PendingCall(body.size, ticket)
+                pendingCalls[call] = record
                 if (closed.get()) {
                     call.cancel()
                     complete(call)
@@ -272,17 +265,19 @@ internal class CfH2Transport(
                 }
                 call.enqueue(object : Callback {
                     override fun onFailure(call: Call, error: IOException) {
-                        fail(error)
+                        if (!intentionallyCancelled.remove(call)) fail(error)
                         complete(call)
                     }
 
                     override fun onResponse(call: Call, response: Response) {
+                        record.receiving.set(true)
                         if (ticket != null) replayWindow.markReceiving(ticket)
+                        else replayWindow.markProgress()
                         try {
                             response.use {
                                 val result = readBoundedReply(response, lane) {
                                     lastProgress.set(System.currentTimeMillis())
-                                    if (ticket != null) replayWindow.markProgress(ticket)
+                                    replayWindow.markProgress(ticket)
                                 }
                                 var queued = false
                                 var queueError: IOException? = null
@@ -368,8 +363,13 @@ internal class CfH2Transport(
 
         private fun dispatchReplayIfDue() {
             if (closed.get()) return
-            val entry = replayWindow.nextReplayCandidate() ?: return
-            val ticket = replayWindow.reserveReplay(entry) ?: return
+            rotateStaleReplayIfDue()
+            // Any in-flight request not represented in the replay history
+            // blocks the latest-idle poll, while overdue tracked requests can
+            // still be replayed independently.
+            val allowIdlePoll = pending.get() == 0
+            val entry = replayWindow.nextReplayCandidate(allowIdlePoll) ?: return
+            val ticket = replayWindow.reserveReplay(entry, allowIdlePoll) ?: return
             runCatching {
                 enqueue(replayWindow.body(entry), ticket, replay = true, waitForCapacity = false)
             }.onFailure { error ->
@@ -378,9 +378,43 @@ internal class CfH2Transport(
             }
         }
 
-        private fun acquireCapacity(semaphore: Semaphore, wait: Boolean): Boolean {
+        private fun acquireUploadSlot(bytes: Int, wait: Boolean): Boolean {
+            val deadline = if (wait) {
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(REQUEST_TIMEOUT_SECONDS)
+            } else System.nanoTime()
+            while (!closed.get()) {
+                if (!acquireCapacity(requests, deadline, laneWide = false, wait = wait)) return false
+                if (!acquireCapacity(lane.requests, deadline, laneWide = true, wait = wait)) {
+                    requests.release()
+                    return false
+                }
+                val laneReserved = lane.reservePending(bytes)
+                val channelReserved = laneReserved && reserveChannelPending(bytes)
+                if (!closed.get() && laneReserved && channelReserved) return true
+
+                if (channelReserved) pendingBytes.addAndGet(-bytes)
+                if (laneReserved) lane.releasePending(bytes)
+                requests.release()
+                lane.requests.release()
+                if (!wait || closed.get() || System.nanoTime() >= deadline) return false
+                rotateOldestPendingRequest(laneWide = !laneReserved)
+                try {
+                    TimeUnit.MILLISECONDS.sleep(100L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return false
+                }
+            }
+            return false
+        }
+
+        private fun acquireCapacity(
+            semaphore: Semaphore,
+            deadline: Long,
+            laneWide: Boolean,
+            wait: Boolean
+        ): Boolean {
             if (!wait) return semaphore.tryAcquire()
-            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(REQUEST_TIMEOUT_SECONDS)
             while (!closed.get()) {
                 val remaining = deadline - System.nanoTime()
                 if (remaining <= 0L) return false
@@ -391,8 +425,55 @@ internal class CfH2Transport(
                     Thread.currentThread().interrupt()
                     return false
                 }
+                rotateOldestPendingRequest(laneWide)
             }
             return false
+        }
+
+        private fun rotateOldestPendingRequest(laneWide: Boolean): Boolean {
+            val source = if (laneWide) {
+                channels.filter { it.belongsToLane(lane) }
+            } else listOf(this)
+            val candidate = source.flatMap { it.rotationCandidates() }
+                .minWithOrNull(compareBy<RotationCandidate> { !it.replay }.thenBy { it.sentAtMs })
+                ?: return false
+            return candidate.channel.rotate(candidate.call, REPLAY_REQUEST_MS)
+        }
+
+        internal fun rotationCandidates(): List<RotationCandidate> {
+            val now = System.nanoTime() / 1_000_000L
+            return pendingCalls.mapNotNull { (call, record) ->
+                val sent = record.sentAtMs.get()
+                if (sent != Long.MIN_VALUE && !record.receiving.get() &&
+                    now - sent >= REPLAY_REQUEST_MS
+                ) RotationCandidate(this, call, sent, record.replay) else null
+            }
+        }
+
+        internal fun belongsToLane(target: Lane): Boolean = lane === target
+
+        internal fun rotate(call: Call, minimumAgeMs: Long): Boolean {
+            val record = pendingCalls[call] ?: return false
+            val sent = record.sentAtMs.get()
+            val age = System.nanoTime() / 1_000_000L - sent
+            if (sent == Long.MIN_VALUE || record.receiving.get() || age < minimumAgeMs) return false
+            record.ticket?.let(replayWindow::retire)
+            intentionallyCancelled.add(call)
+            call.cancel()
+            complete(call)
+            return true
+        }
+
+        private fun rotateStaleReplayIfDue() {
+            val now = System.nanoTime() / 1_000_000L
+            val stale = pendingCalls.entries
+                .filter { (_, record) ->
+                    val sent = record.sentAtMs.get()
+                    record.replay && sent != Long.MIN_VALUE && !record.receiving.get() &&
+                        now - sent >= REPLAY_SLOT_MS
+                }
+                .minByOrNull { it.value.sentAtMs.get() }
+            if (stale != null) rotate(stale.key, REPLAY_SLOT_MS)
         }
 
         private fun reserveChannelPending(bytes: Int): Boolean {
@@ -460,6 +541,7 @@ internal class CfH2Transport(
                 }
             }
             replayWindow.clear()
+            intentionallyCancelled.clear()
             channels.remove(this)
         }
     }
@@ -557,6 +639,8 @@ internal class CfH2Transport(
         const val REQUEST_TIMEOUT_SECONDS = 65L
         const val SETUP_TIMEOUT_SECONDS = 8L
         const val REPLAY_CHECK_MS = 250L
+        const val REPLAY_REQUEST_MS = 3_000L
+        const val REPLAY_SLOT_MS = 30_000L
         val NATIVE_HTTP_ERROR_CODES = setOf(403, 404, 429, 444)
     }
 }

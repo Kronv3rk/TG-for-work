@@ -32,6 +32,7 @@ internal class H2ReplayWindow(
         internal val pending = LinkedHashMap<Long, Pending>()
         internal var firstSentAt: Long? = null
         internal var attempts = 0
+        internal var retired = false
         internal var lastAttemptAt: Long? = null
         internal var replyId: ByteArray? = null
     }
@@ -93,8 +94,10 @@ internal class H2ReplayWindow(
     }
 
     @Synchronized
-    fun markProgress(ticket: Ticket) {
-        if (ticket.entry.pending.containsKey(ticket.id)) lastProgressAt = clock()
+    fun markProgress(ticket: Ticket? = null) {
+        if (ticket == null || ticket.entry.pending.containsKey(ticket.id)) {
+            lastProgressAt = clock()
+        }
     }
 
     @Synchronized
@@ -105,18 +108,18 @@ internal class H2ReplayWindow(
     }
 
     @Synchronized
-    fun nextReplayCandidate(): Entry? {
+    fun nextReplayCandidate(allowLatestIdlePoll: Boolean = true): Entry? {
         val now = clock()
         trimLocked(now)
         return entries.firstOrNull { entry ->
             val age = now - entry.createdAt
-            val waiting = entry.pending.values.any { request ->
+            val waiting = entry.retired || entry.pending.values.any { request ->
                 request.sentAt?.let { !request.receiving && now - it >= requestTimeoutMs } == true
             }
             val anotherRequestPending = entries.any { other ->
                 other !== entry && other.pending.isNotEmpty()
             }
-            val latestIdlePoll = entry === entries.lastOrNull() &&
+            val latestIdlePoll = allowLatestIdlePoll && entry === entries.lastOrNull() &&
                 entry.pending.isEmpty() && !anotherRequestPending &&
                 now - lastProgressAt >= IDLE_POLL_MS
             age in 0..maxAgeMs &&
@@ -130,14 +133,27 @@ internal class H2ReplayWindow(
     }
 
     @Synchronized
-    fun reserveReplay(entry: Entry): Ticket? {
-        if (pendingReplays >= maxConcurrentReplays || nextReplayCandidate() !== entry) return null
+    fun reserveReplay(entry: Entry, allowLatestIdlePoll: Boolean = true): Ticket? {
+        if (pendingReplays >= maxConcurrentReplays ||
+            nextReplayCandidate(allowLatestIdlePoll) !== entry
+        ) return null
         val now = clock()
         entry.attempts += 1
         entry.lastAttemptAt = now
         pendingReplays += 1
         val ticket = registerLocked(entry, replay = true)
         return Ticket(ticket.id, ticket.entry, replay = true, reservedAt = now)
+    }
+
+    /** Retires an overdue request to free a channel/lane slot for newer uploads. */
+    @Synchronized
+    fun retire(ticket: Ticket): Boolean {
+        val pending = ticket.entry.pending[ticket.id] ?: return false
+        if (pending.receiving || pending.sentAt == null) return false
+        ticket.entry.pending.remove(ticket.id)
+        if (pending.replay) pendingReplays = (pendingReplays - 1).coerceAtLeast(0)
+        ticket.entry.retired = true
+        return true
     }
 
     /** Releases a replay reservation that never reached the network. */
@@ -155,10 +171,11 @@ internal class H2ReplayWindow(
     /** Returns false when this is a duplicate response to the same native packet. */
     @Synchronized
     fun acceptReply(ticket: Ticket?, reply: ByteArray): Boolean {
+        lastProgressAt = clock()
         if (ticket == null) return true
         val entry = ticket.entry
+        if (!entry.pending.containsKey(ticket.id)) return false
         val replyId = reply.copyOfRange(0, minOf(24, reply.size))
-        lastProgressAt = clock()
         val previous = entry.replyId
         if (previous != null && previous.contentEquals(replyId)) return false
         entry.replyId = replyId
@@ -203,7 +220,10 @@ internal class H2ReplayWindow(
             retained -= entry.body.size
         }
         while (entries.size > maxPackets || retained > maxBytes) {
-            val victim = entries.firstOrNull { it.pending.isEmpty() } ?: entries.firstOrNull() ?: break
+            val victim = entries.firstOrNull { entry ->
+                entry.pending.isEmpty() &&
+                    !(entry.retired && entry.attempts < maxAttempts && now - entry.createdAt <= maxAgeMs)
+            } ?: entries.firstOrNull() ?: break
             entries.remove(victim)
             retained -= victim.body.size
         }
