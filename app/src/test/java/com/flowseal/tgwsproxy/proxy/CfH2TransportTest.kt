@@ -118,7 +118,9 @@ class CfH2TransportTest {
             fixture.server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     if (request.method == "HEAD") return MockResponse().setResponseCode(200)
-                    return MockResponse().setHeadersDelay(20, TimeUnit.SECONDS)
+                    // Long enough to hit the three-second rotation threshold,
+                    // short enough that MockWebServer can shut down normally.
+                    return MockResponse().setHeadersDelay(5, TimeUnit.SECONDS)
                         .addHeader("Content-Type", "application/octet-stream")
                         .setBody(Buffer().write(ByteArray(24) { 7 }))
                 }
@@ -139,7 +141,7 @@ class CfH2TransportTest {
                     true
                 }
                 assertTrue("ninth upload should proceed after retiring an overdue request",
-                    ninth.get(6, TimeUnit.SECONDS))
+                    ninth.get(4, TimeUnit.SECONDS))
                 awaitRequestCount(fixture.server, 10)
                 channel.close()
             } finally {
