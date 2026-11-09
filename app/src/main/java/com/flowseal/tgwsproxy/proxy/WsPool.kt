@@ -214,12 +214,15 @@ class WsPool<T : Closeable>(
         private const val MAX_BACKOFF_SHIFT = 12
 
         /** Runs [pool]'s upkeep every [MAINTAIN_INTERVAL_MS] until the returned scheduler is shut down. */
-        fun startMaintenance(pool: WsPool<*>): ScheduledExecutorService =
+        fun startMaintenance(pool: WsPool<*>, vararg additional: () -> Unit): ScheduledExecutorService =
             Executors.newSingleThreadScheduledExecutor { task ->
                 Thread(task, "tg-ws-pool-upkeep").apply { isDaemon = true }
             }.apply {
                 scheduleWithFixedDelay(
-                    { runCatching { pool.maintain() } },
+                    { 
+                        runCatching { pool.maintain() }
+                        for (maintenance in additional) runCatching { maintenance() }
+                    },
                     MAINTAIN_INTERVAL_MS,
                     MAINTAIN_INTERVAL_MS,
                     TimeUnit.MILLISECONDS
