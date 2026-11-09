@@ -17,8 +17,7 @@ class H2ReplayWindowTest {
         assertNull(window.remember(oversized))
 
         val first = packet(1)
-        val entry = window.remember(first)
-        assertTrue(entry != null)
+        val entry = window.remember(first)!!
         assertSame(entry, window.remember(first.copyOf()))
 
         val otherKey = window.remember(packet(2))
