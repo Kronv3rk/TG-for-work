@@ -64,7 +64,11 @@ internal object FakeTlsMaskingProfileProbe {
         }
 
         try {
-            val outbound = ByteBuffer.allocate(MAX_HELLO_BYTES)
+            // JSSE demands at least one full TLS packet buffer for wrap(), even
+            // when the resulting ClientHello is only a few hundred bytes.
+            val packetBufferBytes = engine.session.packetBufferSize
+            if (packetBufferBytes !in 1..65_536) return null
+            val outbound = ByteBuffer.allocate(maxOf(MAX_HELLO_BYTES, packetBufferBytes))
             val empty = ByteBuffer.allocate(0)
             repeat(6) {
                 val status = engine.handshakeStatus
