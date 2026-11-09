@@ -40,6 +40,7 @@ class TelegramProxy(
     private val sessionBudget = ProxySessionBudget(options.threadLimit)
     private val cfBalancer = CfProxyBalancer()
     private val routePlanner = RoutePlanner()
+    private val h2Transport = if (options.cfH2MediaEnabled) CfH2Transport() else null
     private val clients = CopyOnWriteArraySet<Socket>()
     private val activeConnections = AtomicInteger(0)
     private val totalConnections = AtomicInteger(0)
@@ -128,6 +129,7 @@ class TelegramProxy(
         routePlanner.resetNetworkState()
         wsPool.clear()
         workerPool.clear()
+        h2Transport?.resetNetwork()
         for (client in clients) runCatching { client.close() }
         ConnectionLog.info("Сеть изменилась: старые подключения закрыты, маршруты пересоздаются")
     }
@@ -232,6 +234,7 @@ class TelegramProxy(
         poolMaintenance = null
         wsPool.close()
         workerPool.close()
+        h2Transport?.close()
         poolExecutor.shutdownNow()
         executor.shutdownNow()
     }
@@ -264,7 +267,10 @@ class TelegramProxy(
                         MtprotoPacketSplitter(relayInit, parsed.protocolInt)
                     }.getOrNull()
 
-                    bridgeRoutes(client, dcId, parsed.isMedia, streams.input, streams.output, relayInit, crypto, splitter)
+                    bridgeRoutes(
+                        client, dcId, parsed.isMedia, streams.input, streams.output,
+                        relayInit, crypto, splitter, parsed.protocolInt
+                    )
                 }
             }
         } catch (ignored: Exception) {
@@ -285,7 +291,8 @@ class TelegramProxy(
         clientOut: OutputStream,
         relayInit: ByteArray,
         crypto: CryptoContext,
-        splitter: MtprotoPacketSplitter?
+        splitter: MtprotoPacketSplitter?,
+        protocol: Int
     ) {
         val wsTarget = wsConnectHost(dcId, options.dcIpMap)
         val methods = routePlanner.methodsFor(dcId, isMedia, networkOptions, wsTarget)
@@ -324,6 +331,9 @@ class TelegramProxy(
                         relayInit,
                         crypto,
                         splitter
+                    )
+                    RouteMethod.HTTP2 -> bridgeHttp2(
+                        client, dcId, isMedia, clientIn, clientOut, crypto, protocol
                     )
                     RouteMethod.CLOUDFLARE -> bridgeCfProxyFallback(
                         client,
@@ -473,6 +483,101 @@ class TelegramProxy(
         } else {
             ConnectionLog.sessionEnd(method, dcId, isMedia, System.currentTimeMillis() - sessionStart, received)
         }
+    }
+
+    /**
+     * Native MTProto over Cloudflare HTTP/2: one encrypted Telegram packet per
+     * /api POST, with multiplexed TLS connections shared through OkHttp.
+     * A failed H2 preflight does not read from the client, so WS fallback is safe.
+     */
+    private fun bridgeHttp2(
+        client: Socket,
+        dcId: Int,
+        isMedia: Boolean,
+        clientIn: InputStream,
+        clientOut: OutputStream,
+        crypto: CryptoContext,
+        protocol: Int
+    ): Boolean {
+        if (!isMedia || !options.cfProxyEnabled || !options.cfH2MediaEnabled) return false
+        val transport = h2Transport ?: return false
+        val domains = cfBalancer.getDomainsForDc(dcId).take(MAX_CF_ATTEMPTS)
+            .map { "kws$dcId.$it" }
+        val begin = System.currentTimeMillis()
+        val channel = transport.open(domains) ?: return false
+        val elapsed = System.currentTimeMillis() - begin
+        cfProxyConnections.incrementAndGet()
+        routePlanner.markConnected(RouteMethod.HTTP2, dcId, isMedia, elapsed)
+        ConnectionLog.connected(RouteMethod.HTTP2, dcId, isMedia, elapsed, "Cloudflare /api")
+        lastMessage = routePlanner.status()
+        val start = System.currentTimeMillis()
+        val received = bridgeClientAndHttp2(client, clientIn, clientOut, channel, crypto, protocol)
+        if (received == 0L) {
+            routePlanner.markFailed(RouteMethod.HTTP2, dcId, isMedia)
+            ConnectionLog.noData(RouteMethod.HTTP2, dcId, isMedia)
+        } else {
+            ConnectionLog.sessionEnd(
+                RouteMethod.HTTP2, dcId, isMedia, System.currentTimeMillis() - start, received
+            )
+        }
+        return true
+    }
+
+    private fun bridgeClientAndHttp2(
+        client: Socket,
+        clientIn: InputStream,
+        clientOut: OutputStream,
+        channel: CfH2Transport.Channel,
+        crypto: CryptoContext,
+        protocol: Int
+    ): Long {
+        val done = AtomicInteger(0)
+        val sessionDown = AtomicLong(0)
+        val download = try {
+            executor.submit {
+                try {
+                    while (done.get() == 0) {
+                        val body = channel.receive() ?: break
+                        val native = H2MtprotoCodec.encodeReply(body, protocol)
+                        val encrypted = crypto.clientEncrypt.update(native)
+                        clientOut.write(encrypted)
+                        clientOut.flush()
+                        sessionDown.addAndGet(body.size.toLong())
+                        bytesDown.addAndGet(body.size.toLong())
+                    }
+                } catch (error: Exception) {
+                    ConnectionLog.info("HTTP/2 загрузка: ${ConnectionLog.failureReason(error)}")
+                } finally {
+                    done.set(1)
+                    channel.close()
+                    runCatching { client.close() }
+                }
+            }
+        } catch (rejected: RejectedExecutionException) {
+            channel.close()
+            runCatching { client.close() }
+            throw rejected
+        }
+
+        try {
+            while (done.get() == 0) {
+                val packet = try {
+                    H2MtprotoCodec.readPacket(clientIn, crypto.clientDecrypt, protocol)
+                } catch (_: java.io.EOFException) {
+                    break
+                }
+                bytesUp.addAndGet(packet.body.size.toLong())
+                channel.send(packet.body)
+            }
+        } catch (error: Exception) {
+            ConnectionLog.info("HTTP/2 отправка: ${ConnectionLog.failureReason(error)}")
+        } finally {
+            done.set(1)
+            channel.close()
+            runCatching { client.close() }
+            download.cancel(true)
+        }
+        return sessionDown.get()
     }
 
     private fun bridgeCfProxyFallback(
