@@ -13,6 +13,7 @@ enum class RouteMethod(
     // One attempt, then a long rest: a fronting SNI that is not whitelisted fails
     // every time, and retrying it would only delay the next route (upstream: 30 min).
     FRONTING("FR", "Fronting", 1_800_000L),
+    HTTP2("H2", "Cloudflare HTTP/2", 30_000L),
     CLOUDFLARE("CF", "Cloudflare", 30_000L),
     TCP("TCP", "TCP", 45_000L)
 }
@@ -118,7 +119,8 @@ class RoutePlanner {
             else -> "Авто: WS > TCP"
         }
         val withFronting = if (options.frontingEnabled) "$core, fronting" else core
-        return if (options.cfWorkerEnabled) "Свой CF Worker → $withFronting" else withFronting
+        val policy = if (options.cfWorkerEnabled) "Свой CF Worker → $withFronting" else withFronting
+        return if (options.cfH2MediaEnabled && options.cfProxyEnabled) "$policy · HTTP/2 медиа (эксп.)" else policy
     }
 
     fun status(): String = lastStatus.get()
@@ -151,7 +153,8 @@ class RoutePlanner {
     fun healthSummary(): String {
         val shown = RouteMethod.values().filter { method ->
             // Fronting is opt-in; only list it once it has been tried.
-            method != RouteMethod.FRONTING || health.keys.any { it.method == method }
+            (method != RouteMethod.FRONTING && method != RouteMethod.HTTP2) ||
+                health.keys.any { it.method == method }
         }
         return shown.joinToString(" · ") { method ->
             val routeStats = health.entries.filter { it.key.method == method }.map { it.value }
@@ -205,7 +208,14 @@ class RoutePlanner {
         } else {
             core
         }
-        return if (options.cfWorkerEnabled) listOf(RouteMethod.WORKER) + withFronting else withFronting
+        val withH2 = if (isMedia && options.cfProxyEnabled && options.cfH2MediaEnabled) {
+            withFronting.flatMap {
+                if (it == RouteMethod.CLOUDFLARE) listOf(RouteMethod.HTTP2, it) else listOf(it)
+            }
+        } else {
+            withFronting
+        }
+        return if (options.cfWorkerEnabled) listOf(RouteMethod.WORKER) + withH2 else withH2
     }
 
     private fun hasRelayFallback(options: ProxyOptions): Boolean =

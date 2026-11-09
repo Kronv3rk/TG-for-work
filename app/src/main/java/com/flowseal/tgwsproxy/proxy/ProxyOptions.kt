@@ -14,7 +14,9 @@ data class ProxyOptions(
     val fakeTlsDomain: String = DEFAULT_FAKE_TLS_DOMAIN,
     val wsPoolEnabled: Boolean = true,
     val frontingSni: String = "",
-    val cellularNetwork: Boolean = false
+    val cellularNetwork: Boolean = false,
+    /** Experimental Cloudflare HTTP/2 media; disabled until device validation. */
+    val cfH2MediaEnabled: Boolean = false
 ) {
     val fakeTlsEnabled: Boolean
         get() = fakeTlsDomain.isNotBlank()
