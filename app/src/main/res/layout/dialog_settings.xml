@@ -297,6 +297,23 @@
              />
 
         <CheckBox
+            android:id="@+id/h2MediaCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:minHeight="52dp"
+            android:text="@string/settings_h2_media_label"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_h2_media_hint"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+
+        <CheckBox
             android:id="@+id/wsPoolCheck"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
