@@ -2,6 +2,7 @@ package com.flowseal.tgwsproxy.proxy
 
 import java.io.ByteArrayOutputStream
 import java.security.SecureRandom
+import java.security.KeyPairGenerator
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -115,17 +116,13 @@ internal object FakeTlsHandshakeProfile {
         require(clientRandom.size == 32 && sessionId.size <= 32)
         val info = parseClientHello(clientHello)
         val group = chooseKeyShareGroup(info)
+        val publicKey = generateX25519PublicKey()
         val keyExchange = if (group == GROUP_X25519_MLKEM768) {
-            ByteArray(HYBRID_SERVER_SHARE_LENGTH).also {
-                random.nextBytes(it)
-                it[it.lastIndex] = (it.last().toInt() and 0x7f).toByte()
-            }
-        } else {
-            ByteArray(32).also {
-                random.nextBytes(it)
-                it[it.lastIndex] = (it.last().toInt() and 0x7f).toByte()
-            }
-        }
+            val data = ByteArray(HYBRID_SERVER_SHARE_LENGTH)
+            random.nextBytes(data)
+            System.arraycopy(publicKey, 0, data, 1088, publicKey.size)
+            data
+        } else publicKey
 
         val extensions = ByteArrayOutputStream()
         // supported_versions: TLS 1.3
@@ -177,6 +174,26 @@ internal object FakeTlsHandshakeProfile {
         val signedRandom = hmac.doFinal(clientRandom + answer)
         System.arraycopy(signedRandom, 0, answer, 11, 32)
         return answer
+    }
+
+    private fun generateX25519PublicKey(): ByteArray {
+        // Modern Android security providers can create an actual X25519 key;
+        // earlier Android releases lack it, so mirror upstream's fallback
+        // to a plausible 255-bit field element. Fake TLS does not derive
+        // traffic secrets from this advertised public key.
+        val generated = runCatching {
+            val x509 = KeyPairGenerator.getInstance("X25519")
+                .generateKeyPair().public.encoded
+            require(x509.size >= 44)
+            val raw = x509.copyOfRange(x509.size - 32, x509.size)
+            require(raw.last().toInt() and 0x80 == 0)
+            raw
+        }.getOrNull()
+        if (generated != null) return generated
+        return ByteArray(32).also {
+            random.nextBytes(it)
+            it[it.lastIndex] = (it.last().toInt() and 0x7f).toByte()
+        }
     }
 
     private fun u8(data: ByteArray, index: Int) = data[index].toInt() and 0xff
