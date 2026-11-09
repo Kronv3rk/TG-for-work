@@ -20,7 +20,11 @@ data class ClientStreams(
     val output: OutputStream
 )
 
-class FakeTls(private val secret: ByteArray, private val maskingDomain: String) {
+class FakeTls(
+    private val secret: ByteArray,
+    private val maskingDomain: String,
+    private val profiledApplicationDataLength: Int? = null
+) {
 
     fun readClientStreams(rawInput: BufferedInputStream, rawOutput: BufferedOutputStream): ClientStreams? {
         val first = rawInput.read()
@@ -146,14 +150,6 @@ class FakeTls(private val secret: ByteArray, private val maskingDomain: String) 
         private const val TLS_APPDATA_MAX = 16_384
         private const val BUFFER_SIZE = 16 * 1024
         private val CCS_FRAME = byteArrayOf(0x14, 0x03, 0x03, 0x00, 0x01, 0x01)
-        @Volatile
-        private var profiledApplicationDataLength: Int? = null
-
-        /** Supplies a validated size measured from the masking site's TLS first flight. */
-        fun setProfiledApplicationDataLength(length: Int?) {
-            profiledApplicationDataLength = length?.let(FakeTlsHandshakeProfile::clampProfileLength)
-        }
-
         fun wrapTlsRecords(data: ByteArray): ByteArray {
             // Write directly to one buffer; repeated byte-array concatenation was
             // quadratic for large media payloads split into many TLS records.
