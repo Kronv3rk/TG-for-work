@@ -634,6 +634,8 @@ internal class CfH2Transport(
         const val REQUEST_TIMEOUT_SECONDS = 65L
         const val SETUP_TIMEOUT_SECONDS = 8L
         const val REPLAY_CHECK_MS = 250L
+        const val REPLAY_REQUEST_MS = 3_000L
+        const val REPLAY_SLOT_MS = 30_000L
         val NATIVE_HTTP_ERROR_CODES = setOf(403, 404, 429, 444)
     }
 }
