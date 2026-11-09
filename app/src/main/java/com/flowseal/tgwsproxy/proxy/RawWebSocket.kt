@@ -47,6 +47,15 @@ class RawWebSocket private constructor(
         }
     }
 
+    /** One flush per decrypted MTProto read, rather than per frame. */
+    fun sendBinaryBatch(packets: List<ByteArray>) {
+        if (closed) throw EOFException("WebSocket closed")
+        synchronized(output) {
+            WebSocketFrameWriter.writeBinaryBatch(output, packets, random)
+            output.flush()
+        }
+    }
+
     fun receive(): ByteArray? {
         while (!closed) {
             // Wait for a new frame at a frame boundary with an idle budget. If the
