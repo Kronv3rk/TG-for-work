@@ -224,7 +224,7 @@ class H2ReplayWindowTest {
         val newerTicket = window.registerOriginal(newer)
         window.markSent(newerTicket)
 
-        now += 3_000L
+        now += 1_000L
         assertNull(window.nextReplayCandidate())
         assertTrue(window.retire(olderTicket))
         assertSame(older, window.nextReplayCandidate())
