@@ -49,7 +49,7 @@ class H2ReplayWindowTest {
 
     @Test
     fun doesNotReplayWhileResponseBodyIsBeingReceived() {
-        var now = 0L
+        var now = 1_000L
         val window = H2ReplayWindow(clock = { now })
         val entry = window.remember(packet(1))!!
         val original = window.registerOriginal(entry)
@@ -66,7 +66,7 @@ class H2ReplayWindowTest {
         var now = 1_000L
         val window = H2ReplayWindow(clock = { now })
         val entries = (1..3).map { value ->
-            val entry = window.remember(packet(value))!!
+            val entry = window.remember(packet(value, authKey = 9))!!
             val original = window.registerOriginal(entry)
             window.markSent(original)
             entry
@@ -129,9 +129,9 @@ class H2ReplayWindowTest {
         assertTrue(window.retainedBytes <= 65_536)
     }
 
-    private fun packet(key: Int, size: Int = 32): ByteArray =
+    private fun packet(key: Int, size: Int = 32, authKey: Int = key): ByteArray =
         ByteArray(size).also {
-            it[0] = key.toByte()
+            it[0] = authKey.toByte()
             for (index in 8 until it.size) it[index] = (index + key).toByte()
         }
 }
