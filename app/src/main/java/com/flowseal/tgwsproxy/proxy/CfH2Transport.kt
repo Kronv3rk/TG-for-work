@@ -192,22 +192,20 @@ internal class CfH2Transport(
                 throw IOException("Invalid H2 upload packet")
             }
 
-            val channelAcquired = if (waitForCapacity) {
-                requests.tryAcquire(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            } else requests.tryAcquire()
+            val channelAcquired = acquireCapacity(requests, waitForCapacity)
             if (!channelAcquired) {
                 releaseTicket(ticket, replay)
-                if (waitForCapacity) throw SocketTimeoutException("H2 channel request budget exhausted")
+                if (waitForCapacity) throw if (closed.get()) IOException("H2 channel closed while waiting for capacity")
+                    else SocketTimeoutException("H2 channel request budget exhausted")
                 return false
             }
 
-            val laneAcquired = if (waitForCapacity) {
-                lane.requests.tryAcquire(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            } else lane.requests.tryAcquire()
+            val laneAcquired = acquireCapacity(lane.requests, waitForCapacity)
             if (!laneAcquired) {
                 requests.release()
                 releaseTicket(ticket, replay)
-                if (waitForCapacity) throw SocketTimeoutException("H2 lane request budget exhausted")
+                if (waitForCapacity) throw if (closed.get()) IOException("H2 channel closed while waiting for lane capacity")
+                    else SocketTimeoutException("H2 lane request budget exhausted")
                 return false
             }
 
@@ -350,6 +348,23 @@ internal class CfH2Transport(
                 replayWindow.cancelReplay(ticket)
                 fail(if (error is IOException) error else IOException("H2 replay scheduling failed", error))
             }
+        }
+
+        private fun acquireCapacity(semaphore: Semaphore, wait: Boolean): Boolean {
+            if (!wait) return semaphore.tryAcquire()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(REQUEST_TIMEOUT_SECONDS)
+            while (!closed.get()) {
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0L) return false
+                val slice = minOf(remaining, TimeUnit.MILLISECONDS.toNanos(250L))
+                try {
+                    if (semaphore.tryAcquire(slice, TimeUnit.NANOSECONDS)) return true
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return false
+                }
+            }
+            return false
         }
 
         private fun reserveChannelPending(bytes: Int): Boolean {
