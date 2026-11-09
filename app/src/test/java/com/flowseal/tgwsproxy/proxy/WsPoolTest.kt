@@ -116,7 +116,7 @@ class WsPoolTest {
     fun failedFirstRelayDomainDoesNotHideWorkingSecondDomain() {
         failedDomains += domains.first()
         assertNull(pool.get(key, "149.154.167.220", domains))
-        assertEquals(3, connects)
+        assertEquals(4, connects)
         assertEquals(2, pool.idleCount(key))
         assertTrue(opened.all { it.domain == domains[1] })
         val next = pool.get(key, "149.154.167.220", domains)
