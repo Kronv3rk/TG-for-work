@@ -512,10 +512,11 @@ class TelegramProxy(
         lastMessage = routePlanner.status()
         val start = System.currentTimeMillis()
         val received = bridgeClientAndHttp2(client, clientIn, clientOut, channel, crypto, protocol)
-        if (received == 0L) {
+        if (received == 0L || channel.failed) {
             routePlanner.markFailed(RouteMethod.HTTP2, dcId, isMedia)
-            ConnectionLog.noData(RouteMethod.HTTP2, dcId, isMedia)
-        } else {
+            if (received == 0L) ConnectionLog.noData(RouteMethod.HTTP2, dcId, isMedia)
+        }
+        if (received > 0L) {
             ConnectionLog.sessionEnd(
                 RouteMethod.HTTP2, dcId, isMedia, System.currentTimeMillis() - start, received
             )
