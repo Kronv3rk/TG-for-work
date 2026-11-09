@@ -12,7 +12,8 @@ internal class WorkerPool<T : Closeable>(
     connector: (dcId: Int, destination: String, domain: String) -> T,
     isOpen: (T) -> Boolean,
     isActive: () -> Boolean,
-    background: (Runnable) -> Unit
+    background: (Runnable) -> Unit,
+    clock: () -> Long = System::currentTimeMillis
 ) : Closeable {
     private val delegate = WsPool(
         size = size,
@@ -26,7 +27,9 @@ internal class WorkerPool<T : Closeable>(
         isOpen = isOpen,
         isTargetBlocked = { false },
         isActive = isActive,
-        background = background
+        background = background,
+        clock = clock,
+        maxAgeMs = 100_000L // upstream _CfWorkerPool.WS_POOL_MAX_AGE
     )
 
     fun get(dcId: Int, destination: String, domains: List<String>): T? {
