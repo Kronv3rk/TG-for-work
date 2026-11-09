@@ -75,7 +75,16 @@ class WebSocketProtocolTest {
         expectProtocolFailure { WebSocketProtocol.validateServerFrame(0x89, 0, 126) }
         expectProtocolFailure { WebSocketProtocol.validateServerFrame(0x09, 0, 0) }
         expectProtocolFailure { WebSocketProtocol.validateServerFrame(0x82, 127, -1) }
-        expectProtocolFailure { WebSocketProtocol.validateServerFrame(0x82, 127, 8L * 1024 * 1024 + 1) }
+        expectProtocolFailure { WebSocketProtocol.validateServerFrame(0x82, 127, 16L * 1024 * 1024 + 1) }
+    }
+
+    @Test
+    fun acceptsUpstreamSixteenMebibyteMessageBoundary() {
+        WebSocketProtocol.validateServerFrame(0x82, 127, 16L * 1024 * 1024)
+        WebSocketProtocol.validateServerFrame(0x82, 127, 8L * 1024 * 1024 + 1)
+        expectProtocolFailure {
+            WebSocketProtocol.validateServerFrame(0x82, 127, 16L * 1024 * 1024 + 1)
+        }
     }
 
     @Test
