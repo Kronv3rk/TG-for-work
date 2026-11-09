@@ -25,14 +25,14 @@ internal class H2ReplayWindow(
     ) {
         internal class Pending(
             val replay: Boolean,
-            var sentAt: Long = 0L,
+            var sentAt: Long? = null,
             var receiving: Boolean = false
         )
 
         internal val pending = LinkedHashMap<Long, Pending>()
-        internal var firstSentAt = 0L
+        internal var firstSentAt: Long? = null
         internal var attempts = 0
-        internal var lastAttemptAt = 0L
+        internal var lastAttemptAt: Long? = null
         internal var replyId: ByteArray? = null
     }
 
@@ -80,7 +80,7 @@ internal class H2ReplayWindow(
         val pending = ticket.entry.pending[ticket.id] ?: return
         val now = clock()
         pending.sentAt = now
-        if (!ticket.replay && ticket.entry.firstSentAt == 0L) {
+        if (!ticket.replay && ticket.entry.firstSentAt == null) {
             ticket.entry.firstSentAt = now
         }
     }
@@ -104,14 +104,12 @@ internal class H2ReplayWindow(
         return entries.firstOrNull { entry ->
             val age = now - entry.createdAt
             val waiting = entry.pending.values.any { request ->
-                request.sentAt > 0L && !request.receiving &&
-                    now - request.sentAt >= requestTimeoutMs
+                request.sentAt?.let { !request.receiving && now - it >= requestTimeoutMs } == true
             }
             age in 0..maxAgeMs &&
-                entry.firstSentAt > 0L &&
-                now - entry.firstSentAt <= maxAgeMs &&
+                entry.firstSentAt?.let { now - it <= maxAgeMs } == true &&
                 entry.attempts < maxAttempts &&
-                (entry.lastAttemptAt == 0L || now - entry.lastAttemptAt >= retryDelayMs) &&
+                (entry.lastAttemptAt == null || now - entry.lastAttemptAt!! >= retryDelayMs) &&
                 entry.pending.values.none { it.replay } &&
                 entry.pending.values.none { it.receiving } &&
                 waiting
@@ -129,7 +127,6 @@ internal class H2ReplayWindow(
         return Ticket(ticket.id, ticket.entry, replay = true, reservedAt = now)
     }
 
-    /** Returns false when this is a duplicate response to the same native packet. */
     /** Releases a replay reservation that never reached the network. */
     @Synchronized
     fun cancelReplay(ticket: Ticket) {
@@ -142,6 +139,7 @@ internal class H2ReplayWindow(
         }
     }
 
+    /** Returns false when this is a duplicate response to the same native packet. */
     @Synchronized
     fun acceptReply(ticket: Ticket?, reply: ByteArray): Boolean {
         if (ticket == null) return true
