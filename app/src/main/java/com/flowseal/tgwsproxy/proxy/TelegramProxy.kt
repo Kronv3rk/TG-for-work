@@ -568,7 +568,12 @@ class TelegramProxy(
                     break
                 }
                 bytesUp.addAndGet(packet.body.size.toLong())
-                channel.send(packet.body)
+                try {
+                    channel.send(packet.body)
+                } catch (error: IOException) {
+                    channel.abort(error)
+                    throw error
+                }
             }
         } catch (error: Exception) {
             ConnectionLog.info("HTTP/2 отправка: ${ConnectionLog.failureReason(error)}")
