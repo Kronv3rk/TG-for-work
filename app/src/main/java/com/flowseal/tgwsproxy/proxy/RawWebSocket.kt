@@ -40,7 +40,7 @@ class RawWebSocket private constructor(
     fun sendBinary(data: ByteArray) {
         if (closed) throw EOFException("WebSocket closed")
         synchronized(output) {
-            output.write(buildFrame(OP_BINARY, data, masked = true))
+            WebSocketFrameWriter.writeBinary(output, data, random)
             output.flush()
         }
     }
