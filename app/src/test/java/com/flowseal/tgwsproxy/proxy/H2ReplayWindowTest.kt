@@ -213,6 +213,39 @@ class H2ReplayWindowTest {
         assertSame(entry, window.nextReplayCandidate(allowLatestIdlePoll = true))
     }
 
+    @Test
+    fun retiredOverdueOriginalCanBeReplayedEvenWhenItIsNotTheLatestPacket() {
+        var now = 1_000L
+        val window = H2ReplayWindow(clock = { now })
+        val older = window.remember(packet(1, authKey = 9))!!
+        val olderTicket = window.registerOriginal(older)
+        window.markSent(olderTicket)
+        val newer = window.remember(packet(2, authKey = 9))!!
+        val newerTicket = window.registerOriginal(newer)
+        window.markSent(newerTicket)
+
+        now += 3_000L
+        assertNull(window.nextReplayCandidate())
+        assertTrue(window.retire(olderTicket))
+        assertSame(older, window.nextReplayCandidate())
+        val replay = window.reserveReplay(older)!!
+        window.complete(replay)
+        window.complete(newerTicket)
+    }
+
+    @Test
+    fun cannotRetireARequestWhoseResponseBodyHasStarted() {
+        var now = 1_000L
+        val window = H2ReplayWindow(clock = { now })
+        val entry = window.remember(packet(1))!!
+        val original = window.registerOriginal(entry)
+        window.markSent(original)
+        window.markReceiving(original)
+        now += 30_000L
+        assertFalse(window.retire(original))
+        assertNull(window.nextReplayCandidate())
+    }
+
     private fun packet(key: Int, size: Int = 32, authKey: Int = key): ByteArray =
         ByteArray(size).also {
             it[0] = authKey.toByte()
