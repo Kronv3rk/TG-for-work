@@ -32,6 +32,7 @@ internal class H2ReplayWindow(
         internal val pending = LinkedHashMap<Long, Pending>()
         internal var firstSentAt: Long? = null
         internal var attempts = 0
+        internal var retired = false
         internal var lastAttemptAt: Long? = null
         internal var replyId: ByteArray? = null
     }
@@ -112,7 +113,7 @@ internal class H2ReplayWindow(
         trimLocked(now)
         return entries.firstOrNull { entry ->
             val age = now - entry.createdAt
-            val waiting = entry.pending.values.any { request ->
+            val waiting = entry.retired || entry.pending.values.any { request ->
                 request.sentAt?.let { !request.receiving && now - it >= requestTimeoutMs } == true
             }
             val anotherRequestPending = entries.any { other ->
@@ -142,6 +143,17 @@ internal class H2ReplayWindow(
         pendingReplays += 1
         val ticket = registerLocked(entry, replay = true)
         return Ticket(ticket.id, ticket.entry, replay = true, reservedAt = now)
+    }
+
+    /** Retires an overdue request to free a channel/lane slot for newer uploads. */
+    @Synchronized
+    fun retire(ticket: Ticket): Boolean {
+        val pending = ticket.entry.pending[ticket.id] ?: return false
+        if (pending.receiving || pending.sentAt == null) return false
+        ticket.entry.pending.remove(ticket.id)
+        if (pending.replay) pendingReplays = (pendingReplays - 1).coerceAtLeast(0)
+        ticket.entry.retired = true
+        return true
     }
 
     /** Releases a replay reservation that never reached the network. */
@@ -207,7 +219,10 @@ internal class H2ReplayWindow(
             retained -= entry.body.size
         }
         while (entries.size > maxPackets || retained > maxBytes) {
-            val victim = entries.firstOrNull { it.pending.isEmpty() } ?: entries.firstOrNull() ?: break
+            val victim = entries.firstOrNull { entry ->
+                entry.pending.isEmpty() &&
+                    !(entry.retired && entry.attempts < maxAttempts && now - entry.createdAt <= maxAgeMs)
+            } ?: entries.firstOrNull() ?: break
             entries.remove(victim)
             retained -= victim.body.size
         }
