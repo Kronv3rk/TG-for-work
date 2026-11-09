@@ -113,6 +113,7 @@ internal class H2ReplayWindow(
                 entry.attempts < maxAttempts &&
                 (entry.lastAttemptAt == 0L || now - entry.lastAttemptAt >= retryDelayMs) &&
                 entry.pending.values.none { it.replay } &&
+                entry.pending.values.none { it.receiving } &&
                 waiting
         }
     }
