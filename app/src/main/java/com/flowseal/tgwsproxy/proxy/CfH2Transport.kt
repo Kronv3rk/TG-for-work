@@ -149,6 +149,7 @@ internal class CfH2Transport(
         private val pendingCalls = ConcurrentHashMap<Call, PendingCall>()
         private val pending = AtomicInteger(0)
         private val queuedReplies = ArrayBlockingQueue<QueuedReply>(MAX_CHANNEL_REQUESTS)
+        private val replyLock = Any()
         private val queuedBytes = AtomicInteger(0)
         private val pendingBytes = AtomicInteger(0)
         private val lastProgress = AtomicLong(System.currentTimeMillis())
@@ -240,6 +241,12 @@ internal class CfH2Transport(
                     .build()
                 call = client.newCall(request)
                 pendingCalls[call] = PendingCall(body.size, ticket)
+                if (closed.get()) {
+                    call.cancel()
+                    complete(call)
+                    if (waitForCapacity) throw IOException("H2 channel closed while scheduling request")
+                    return false
+                }
                 call.enqueue(object : Callback {
                     override fun onFailure(call: Call, error: IOException) {
                         fail(error)
@@ -254,17 +261,19 @@ internal class CfH2Transport(
                                     lastProgress.set(System.currentTimeMillis())
                                 }
                                 var queued = false
-                                if (!closed.get() && result.body.isNotEmpty() &&
-                                    replayWindow.acceptReply(ticket, result.body)
-                                ) {
-                                    val after = queuedBytes.addAndGet(result.body.size)
-                                    if (after <= MAX_CHANNEL_BYTES &&
-                                        queuedReplies.offer(QueuedReply(result.body, result.reservedBytes))
-                                    ) {
-                                        queued = true
-                                        lastProgress.set(System.currentTimeMillis())
-                                    } else {
-                                        queuedBytes.addAndGet(-result.body.size)
+                                if (result.body.isNotEmpty() && replayWindow.acceptReply(ticket, result.body)) {
+                                    synchronized(replyLock) {
+                                        if (!closed.get()) {
+                                            val after = queuedBytes.addAndGet(result.body.size)
+                                            if (after <= MAX_CHANNEL_BYTES &&
+                                                queuedReplies.offer(QueuedReply(result.body, result.reservedBytes))
+                                            ) {
+                                                queued = true
+                                                lastProgress.set(System.currentTimeMillis())
+                                            } else {
+                                                queuedBytes.addAndGet(-result.body.size)
+                                            }
+                                        }
                                     }
                                 }
                                 if (!queued && result.reservedBytes > 0) {
@@ -395,10 +404,12 @@ internal class CfH2Transport(
                 call.cancel()
                 complete(call)
             }
-            while (true) {
-                val reply = queuedReplies.poll() ?: break
-                queuedBytes.addAndGet(-reply.body.size)
-                lane.releaseReply(reply.reservedBytes)
+            synchronized(replyLock) {
+                while (true) {
+                    val reply = queuedReplies.poll() ?: break
+                    queuedBytes.addAndGet(-reply.body.size)
+                    lane.releaseReply(reply.reservedBytes)
+                }
             }
             replayWindow.clear()
             channels.remove(this)
