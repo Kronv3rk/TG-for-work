@@ -1,0 +1,53 @@
+name: Android Release Request Router
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'release/v*.request'
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  dispatch-signed-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout release request
+        uses: actions/checkout@v4
+
+      - name: Trigger existing signed release workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REQUEST="$(git show --pretty=format: --name-only "$GITHUB_SHA" \
+            | grep -E '^release/v[0-9]+\.[0-9]+\.[0-9]+\.request$' | head -n 1)"
+          if [[ -z "$REQUEST" ]]; then
+            echo "::error::No valid release request changed in this commit" >&2
+            exit 1
+          fi
+          TAG="$(tr -d '\r\n' < "$REQUEST")"
+          FILE_TAG="$(basename "$REQUEST" .request)"
+          if [[ "$TAG" != "$FILE_TAG" ]]; then
+            echo "::error::Release request content must match its filename" >&2
+            exit 1
+          fi
+          VERSION="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          if [[ "$TAG" != "v$VERSION" ]]; then
+            echo "::error::Requested $TAG differs from Android version v$VERSION" >&2
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; no new APK will be published."
+            exit 0
+          fi
+          gh workflow run android-release.yml --ref main -f tag="$TAG" \
+            --repo "$GITHUB_REPOSITORY"
+          echo "Requested signed Android release $TAG"
