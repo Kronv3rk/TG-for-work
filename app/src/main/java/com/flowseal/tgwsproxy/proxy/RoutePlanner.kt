@@ -67,10 +67,17 @@ class RoutePlanner {
      *
      * This mirrors the adaptive 2s/10s timeout used by the upstream tg-ws-proxy.
      */
-    fun connectTimeoutMs(method: RouteMethod, dcId: Int, isMedia: Boolean): Int {
-        val failedAt = lastFailureAt[RouteKey(method, dcId, isMedia)] ?: return NORMAL_CONNECT_MS
-        val sinceFailure = System.currentTimeMillis() - failedAt
-        return if (sinceFailure in 0 until PROBATION_WINDOW_MS) PROBATION_CONNECT_MS else NORMAL_CONNECT_MS
+    fun connectTimeoutMs(method: RouteMethod, dcId: Int, isMedia: Boolean, attempt: Int = 0): Int {
+        val failedAt = lastFailureAt[RouteKey(method, dcId, isMedia)]
+        val sinceFailure = failedAt?.let { System.currentTimeMillis() - it }
+        val base = if (sinceFailure != null && sinceFailure in 0 until PROBATION_WINDOW_MS) {
+            PROBATION_CONNECT_MS
+        } else {
+            NORMAL_CONNECT_MS
+        }
+        // One blocked Cloudflare domain must not impose the full timeout again
+        // for every subsequent candidate of the same failed route.
+        return if (attempt > 0) minOf(base, RETRY_CONNECT_MS) else base
     }
 
     /**
@@ -277,6 +284,7 @@ class RoutePlanner {
 
     private companion object {
         const val NORMAL_CONNECT_MS = 8_000
+        const val RETRY_CONNECT_MS = 4_000
         const val PROBATION_CONNECT_MS = 3_000
         const val PROBATION_WINDOW_MS = 120_000L
         const val TARGET_TIMEOUT_COOLDOWN_MS = 3_600_000L

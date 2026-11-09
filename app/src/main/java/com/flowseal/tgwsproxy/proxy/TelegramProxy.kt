@@ -276,6 +276,7 @@ class TelegramProxy(
             routePlanner.markTrying(method, dcId, isMedia)
             lastMessage = routePlanner.status()
 
+            var failureReason = "нет доступного адреса"
             val handled = runCatching {
                 when (method) {
                     RouteMethod.WORKER -> bridgeCfWorker(
@@ -319,14 +320,15 @@ class TelegramProxy(
                     )
                     RouteMethod.TCP -> bridgeTcpFallback(client, dcId, isMedia, clientIn, clientOut, relayInit, crypto)
                 }
-            }.getOrElse {
+            }.getOrElse { error ->
+                failureReason = ConnectionLog.failureReason(error)
                 false
             }
 
             if (handled) return
 
             routePlanner.markFailed(method, dcId, isMedia)
-            ConnectionLog.connectFailed(method, dcId, isMedia, "")
+            ConnectionLog.connectFailed(method, dcId, isMedia, failureReason)
             lastMessage = routePlanner.status()
         }
 
@@ -359,8 +361,8 @@ class TelegramProxy(
             }
         }
 
-        val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WEBSOCKET, dcId, isMedia)
-        for (domain in domains) {
+        for ((attempt, domain) in domains.withIndex()) {
+            val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WEBSOCKET, dcId, isMedia, attempt)
             val connectStart = System.currentTimeMillis()
             val ws = try {
                 RawWebSocket.connect(host, domain, connectTimeout)
@@ -466,12 +468,12 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ): Boolean {
-        val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.CLOUDFLARE, dcId, isMedia)
         // Cap the number of domains tried per connection. Without a cap a fully
         // blocked Cloudflare pool could burn through every domain before falling
         // back, which is exactly when media stalls for tens of seconds.
-        for (baseDomain in cfBalancer.getDomainsForDc(dcId).take(MAX_CF_ATTEMPTS)) {
+        for ((attempt, baseDomain) in cfBalancer.getDomainsForDc(dcId).take(MAX_CF_ATTEMPTS).withIndex()) {
             val domain = "kws$dcId.$baseDomain"
+            val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.CLOUDFLARE, dcId, isMedia, attempt)
             val connectStart = System.currentTimeMillis()
             val ws = try {
                 RawWebSocket.connect(domain, domain, connectTimeout)
@@ -522,9 +524,9 @@ class TelegramProxy(
         crypto: CryptoContext
     ): Boolean {
         val dst = directIp(dcId) ?: return false
-        val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WORKER, dcId, isMedia)
-        for (workerDomain in options.cfWorkerDomains.take(MAX_CF_ATTEMPTS)) {
+        for ((attempt, workerDomain) in options.cfWorkerDomains.take(MAX_CF_ATTEMPTS).withIndex()) {
             val path = "/apiws?dst=$dst&dc=$dcId"
+            val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WORKER, dcId, isMedia, attempt)
             val connectStart = System.currentTimeMillis()
             val ws = try {
                 RawWebSocket.connect(workerDomain, workerDomain, connectTimeout, path)

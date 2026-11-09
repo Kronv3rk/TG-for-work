@@ -43,6 +43,22 @@ object ConnectionLog {
         )
     }
 
+    /**
+     * Exceptions can contain user-configured relay domains, URLs and other secrets.
+     * Keep only a typed, actionable reason in the shared log and Logcat.
+     */
+    fun failureReason(error: Throwable): String = when (error) {
+        is java.net.SocketTimeoutException -> "таймаут"
+        is javax.net.ssl.SSLHandshakeException -> "TLS-проверка"
+        is java.net.ConnectException -> "соединение отклонено"
+        is java.net.UnknownHostException -> "DNS-ошибка"
+        is java.io.EOFException -> "поток закрыт"
+        is java.util.concurrent.RejectedExecutionException -> "лимит рабочих потоков"
+        is javax.net.ssl.SSLException -> "ошибка TLS"
+        is java.net.SocketException -> "ошибка сокета"
+        else -> "сбой соединения (${error.javaClass.simpleName})"
+    }
+
     fun connectFailed(method: RouteMethod, dcId: Int, isMedia: Boolean, reason: String) {
         add(Event.CONNECT_FAILED, "${method.label} ${dcLabel(dcId, isMedia)} не ответил${reasonSuffix(reason)}")
     }

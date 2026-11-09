@@ -1,0 +1,39 @@
+name: Android Release Notes
+
+on:
+  workflow_run:
+    workflows: ["Android Release"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  update-notes:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Apply version-specific release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          TAG="v$VERSION"
+          NOTES="release-notes/$TAG.md"
+          if [[ ! -s "$NOTES" ]]; then
+            echo "No dedicated notes for $TAG"
+            exit 0
+          fi
+          gh release view "$TAG" --json tagName > /dev/null
+          gh release edit "$TAG" --notes-file "$NOTES"
+          echo "Updated notes for $TAG"
