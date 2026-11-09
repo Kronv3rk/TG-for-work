@@ -135,7 +135,7 @@ class CfH2TransportTest {
             fixture.server.enqueue(MockResponse().setResponseCode(200))
             val responseBytes = ByteArray(24) { (it + 9).toByte() }
             fixture.server.enqueue(
-                MockResponse().setHeadersDelay(4, TimeUnit.SECONDS)
+                MockResponse().setHeadersDelay(3_500, TimeUnit.MILLISECONDS)
                     .addHeader("Content-Type", "application/octet-stream")
                     .setBody(Buffer().write(responseBytes))
             )
@@ -148,7 +148,7 @@ class CfH2TransportTest {
                 val channel = transport.open(listOf("localhost:${fixture.server.port}"))!!
                 channel.send(ByteArray(24).also { it[0] = 1 })
                 assertArrayEquals(responseBytes, channel.receive())
-                Thread.sleep(1_500L)
+                Thread.sleep(1_000L)
                 assertEquals("HEAD plus original and one replay", 3, fixture.server.requestCount)
                 assertEquals("late duplicate response must not be queued", 0, channel.queuedReplyCount)
                 assertFalse(channel.failed)
