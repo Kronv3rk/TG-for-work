@@ -92,6 +92,9 @@ class TelegramProxy(
     )
 
     @Volatile
+    private var maskingProfileLength: Int? = null
+
+    @Volatile
     private var poolMaintenance: ScheduledExecutorService? = null
 
     val proxyLink: String
@@ -148,6 +151,14 @@ class TelegramProxy(
         val server = ServerSocket(options.port, 50, address)
         server.reuseAddress = true
         serverSocket = server
+        if (options.fakeTlsEnabled && options.fakeTlsDomain.isNotBlank()) {
+            // One short, bounded probe per listener startup. Never perform an
+            // outbound TLS handshake on Android's main or socket-accept thread.
+            poolExecutor.execute {
+                val measured = FakeTlsMaskingProfileProbe.probe(options.fakeTlsDomain)
+                if (isRunning) maskingProfileLength = measured
+            }
+        }
         if (options.wsPoolEnabled && poolMaintenance == null) {
             poolMaintenance = WsPool.startMaintenance(wsPool, workerPool::maintain)
         }
@@ -244,7 +255,7 @@ class TelegramProxy(
         try {
             BufferedInputStream(client.getInputStream()).use { rawIn ->
                 BufferedOutputStream(client.getOutputStream()).use { rawOut ->
-                    val fakeTls = FakeTls(secretBytes, options.fakeTlsDomain)
+                    val fakeTls = FakeTls(secretBytes, options.fakeTlsDomain, maskingProfileLength)
                     val streams = fakeTls.readClientStreams(rawIn, rawOut) ?: run {
                         maskedConnections.incrementAndGet()
                         return
