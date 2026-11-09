@@ -29,6 +29,14 @@ class CfH2TransportTest {
         }
     }
 
+    private fun awaitRequestCount(server: MockWebServer, expected: Int) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (server.requestCount < expected && System.nanoTime() < deadline) {
+            Thread.sleep(50L)
+        }
+        assertEquals(expected, server.requestCount)
+    }
+
     private fun createServer(http2: Boolean): LocalServer {
         val certificate = HeldCertificate.Builder()
             .addSubjectAlternativeName("localhost")
@@ -121,14 +129,14 @@ class CfH2TransportTest {
                         it[8] = (index + 1).toByte()
                     })
                 }
-                assertEquals(9, fixture.server.requestCount)
+                awaitRequestCount(fixture.server, 9)
                 val ninth = executor.submit<Boolean> {
                     channel.send(ByteArray(24).also { it[0] = 1; it[8] = 9 })
                     true
                 }
                 assertTrue("ninth upload should proceed after retiring an overdue request",
                     ninth.get(6, TimeUnit.SECONDS))
-                assertEquals(10, fixture.server.requestCount)
+                awaitRequestCount(fixture.server, 10)
                 channel.close()
             } finally {
                 executor.shutdownNow()
