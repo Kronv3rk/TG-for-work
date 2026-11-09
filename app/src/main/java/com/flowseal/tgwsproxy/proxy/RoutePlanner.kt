@@ -119,7 +119,8 @@ class RoutePlanner {
             else -> "Авто: WS > TCP"
         }
         val withFronting = if (options.frontingEnabled) "$core, fronting" else core
-        return if (options.cfWorkerEnabled) "Свой CF Worker → $withFronting" else withFronting
+        val policy = if (options.cfWorkerEnabled) "Свой CF Worker → $withFronting" else withFronting
+        return if (options.cfH2MediaEnabled && options.cfProxyEnabled) "$policy · HTTP/2 медиа (эксп.)" else policy
     }
 
     fun status(): String = lastStatus.get()
