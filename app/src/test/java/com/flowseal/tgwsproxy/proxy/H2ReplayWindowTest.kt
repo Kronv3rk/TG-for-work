@@ -198,6 +198,21 @@ class H2ReplayWindowTest {
         assertSame(entry, window.nextReplayCandidate())
     }
 
+    @Test
+    fun latestIdlePollWaitsWhileUntrackedRequestIsInFlight() {
+        var now = 1_000L
+        val window = H2ReplayWindow(clock = { now })
+        val entry = window.remember(packet(1))!!
+        val original = window.registerOriginal(entry)
+        window.markSent(original)
+        window.markReceiving(original)
+        window.complete(original)
+        now += 1_000L
+
+        assertNull(window.nextReplayCandidate(allowLatestIdlePoll = false))
+        assertSame(entry, window.nextReplayCandidate(allowLatestIdlePoll = true))
+    }
+
     private fun packet(key: Int, size: Int = 32, authKey: Int = key): ByteArray =
         ByteArray(size).also {
             it[0] = authKey.toByte()
