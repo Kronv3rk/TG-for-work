@@ -112,6 +112,8 @@ internal class CfH2Transport : Closeable {
         private val pendingBytes = AtomicInteger(0)
         private val lastProgress = AtomicLong(System.currentTimeMillis())
 
+        val failed: Boolean get() = failure.get() != null
+
         @Throws(IOException::class)
         fun send(body: ByteArray) {
             if (closed.get()) throw IOException("H2 channel already closed")
@@ -138,14 +140,15 @@ internal class CfH2Transport : Closeable {
             }
             pending.incrementAndGet()
             lastProgress.set(System.currentTimeMillis())
-            val request = Request.Builder()
-                .url("https://$host/api")
-                .header("Accept-Encoding", "identity")
-                .post(body.toRequestBody("application/octet-stream".toMediaType()))
-                .build()
-            val call = client.newCall(request)
-            pendingCalls.add(call)
+            var call: Call? = null
             try {
+                val request = Request.Builder()
+                    .url("https://$host/api")
+                    .header("Accept-Encoding", "identity")
+                    .post(body.toRequestBody("application/octet-stream".toMediaType()))
+                    .build()
+                call = client.newCall(request)
+                pendingCalls.add(call)
                 call.enqueue(object : Callback {
                     override fun onFailure(call: Call, error: IOException) {
                         fail(error)
@@ -177,7 +180,11 @@ internal class CfH2Transport : Closeable {
                     }
                 })
             } catch (error: Exception) {
-                complete(call, body.size)
+                if (call == null) {
+                    releaseBudget(body.size)
+                } else {
+                    complete(call, body.size)
+                }
                 throw IOException("Cannot schedule H2 request", error)
             }
         }
@@ -211,7 +218,10 @@ internal class CfH2Transport : Closeable {
         }
 
         private fun complete(call: Call, size: Int) {
-            if (!pendingCalls.remove(call)) return
+            if (pendingCalls.remove(call)) releaseBudget(size)
+        }
+
+        private fun releaseBudget(size: Int) {
             pending.decrementAndGet()
             pendingBytes.addAndGet(-size)
             synchronized(lane.lock) { lane.pendingBytes -= size }
