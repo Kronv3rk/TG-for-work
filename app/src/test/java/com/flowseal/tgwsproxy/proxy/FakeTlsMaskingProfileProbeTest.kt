@@ -28,6 +28,30 @@ class FakeTlsMaskingProfileProbeTest {
         assertEquals(0, FakeTlsMaskingProfileProbe.firstApplicationDataLength(byteArrayOf(0x10, 0x03, 0x03, 0, 1, 0)))
     }
 
+    @Test(timeout = 12_000)
+    fun probesARealTls13ServerWithoutCompletingHandshake() {
+        val certificate = okhttp3.tls.HeldCertificate.Builder()
+            .addSubjectAlternativeName("localhost")
+            .build()
+        val serverCertificates = okhttp3.tls.HandshakeCertificates.Builder()
+            .heldCertificate(certificate)
+            .build()
+        val server = okhttp3.mockwebserver.MockWebServer()
+        server.useHttps(serverCertificates.sslSocketFactory(), false)
+        server.start()
+        try {
+            val firstEncrypted = FakeTlsMaskingProfileProbe.probe(
+                "localhost", timeoutMs = 5_000, port = server.port
+            )
+            org.junit.Assert.assertTrue(
+                "TLS 1.3 masking server should produce an encrypted first flight",
+                firstEncrypted != null && firstEncrypted in 1..16_384
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
     @Test
     fun limitsMalformedRecordSizesAndNeverReadsPastBoundary() {
         assertNull(FakeTlsMaskingProfileProbe.firstApplicationDataLength(byteArrayOf(0x16, 0x03, 0x03, 0x7f, 0xff.toByte())))
