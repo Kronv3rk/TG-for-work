@@ -129,6 +129,21 @@ class H2ReplayWindowTest {
         assertTrue(window.retainedBytes <= 65_536)
     }
 
+    @Test
+    fun cancellingUnsentReplayRestoresItsRetryBudget() {
+        var now = 1_000L
+        val window = H2ReplayWindow(clock = { now })
+        val entry = window.remember(packet(1))!!
+        val original = window.registerOriginal(entry)
+        window.markSent(original)
+        now += 3_000L
+        val replay = window.reserveReplay(entry)!!
+        assertEquals(1, window.attemptsForTest(entry))
+        window.cancelReplay(replay)
+        assertEquals(0, window.attemptsForTest(entry))
+        assertSame(entry, window.nextReplayCandidate())
+    }
+
     private fun packet(key: Int, size: Int = 32, authKey: Int = key): ByteArray =
         ByteArray(size).also {
             it[0] = authKey.toByte()
