@@ -55,7 +55,8 @@ class WorkerPoolTest {
         assertNull(pool.get(2, "149.154.167.51", domain))
         val first = opened.single()
         now += 99_999L
-        assertNotNull(pool.get(2, "149.154.167.51", domain))
+        pool.maintain()
+        assertTrue(first.open)
         now += 1L
         pool.maintain()
         assertFalse("Worker sockets must expire after upstream 100 second TTL", first.open)
