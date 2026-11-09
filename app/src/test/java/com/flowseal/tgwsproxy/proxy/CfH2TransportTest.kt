@@ -1,5 +1,6 @@
 package com.flowseal.tgwsproxy.proxy
 
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -94,6 +95,43 @@ class CfH2TransportTest {
                 assertNull(transport.open(listOf(endpoint)))
                 assertEquals(1, fixture.server.requestCount)
             } finally {
+                transport.close()
+            }
+        }
+    }
+
+    @Test(timeout = 20_000)
+    fun rotatesOldestUnansweredRequestWhenChannelUploadSlotsAreFull() {
+        createServer(http2 = true).use { fixture ->
+            fixture.server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (request.method == "HEAD") return MockResponse().setResponseCode(200)
+                    return MockResponse().setHeadersDelay(20, TimeUnit.SECONDS)
+                        .addHeader("Content-Type", "application/octet-stream")
+                        .setBody(Buffer().write(ByteArray(24) { 7 }))
+                }
+            }
+            val transport = CfH2Transport(fixture.client)
+            val executor = Executors.newSingleThreadExecutor()
+            try {
+                val channel = transport.open(listOf("localhost:${fixture.server.port}"))!!
+                repeat(8) { index ->
+                    channel.send(ByteArray(24).also {
+                        it[0] = 1
+                        it[8] = (index + 1).toByte()
+                    })
+                }
+                assertEquals(9, fixture.server.requestCount)
+                val ninth = executor.submit<Boolean> {
+                    channel.send(ByteArray(24).also { it[0] = 1; it[8] = 9 })
+                    true
+                }
+                assertTrue("ninth upload should proceed after retiring an overdue request",
+                    ninth.get(6, TimeUnit.SECONDS))
+                assertEquals(10, fixture.server.requestCount)
+                channel.close()
+            } finally {
+                executor.shutdownNow()
                 transport.close()
             }
         }
