@@ -184,10 +184,13 @@ class WsPool<T : Closeable>(
         for (domain in slot.domains) {
             try {
                 return connector(slot.host, domain)
-            } catch (redirect: WebSocketHandshakeException) {
-                if (!redirect.isRedirect) return null
+            } catch (ignored: WebSocketHandshakeException) {
+                // Another domain may be healthy even when this relay returns
+                // HTTP 4xx/5xx or a redirect. Follow upstream's full fallback
+                // sequence, then back off only if every candidate fails.
+                continue
             } catch (ignored: Exception) {
-                return null
+                continue
             }
         }
         return null
