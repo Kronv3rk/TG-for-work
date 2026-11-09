@@ -11,6 +11,13 @@ import kotlin.experimental.xor
 internal object WebSocketFrameWriter {
     private const val CHUNK_BYTES = 16 * 1024
 
+    /** Upstream send_batch: frame packets separately, flush the socket only once. */
+    fun writeBinaryBatch(output: OutputStream, packets: List<ByteArray>, random: SecureRandom) {
+        for (packet in packets) {
+            if (packet.isNotEmpty()) writeBinary(output, packet, random)
+        }
+    }
+
     fun writeBinary(output: OutputStream, payload: ByteArray, random: SecureRandom) {
         val length = payload.size
         val header = ByteArray(14)
