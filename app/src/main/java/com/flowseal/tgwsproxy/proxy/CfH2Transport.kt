@@ -219,6 +219,9 @@ internal class CfH2Transport(
         }
 
         private fun fail(error: IOException) {
+            // Cancelled calls from a normal client disconnect are not evidence
+            // that the H2 route is unhealthy.
+            if (closed.get()) return
             failure.compareAndSet(null, error)
             close()
         }
@@ -283,6 +286,9 @@ internal class CfH2Transport(
                 .writeTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .callTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(false)
+                // Never forward native MTProto POST bodies to redirect targets.
+                .followRedirects(false)
+                .followSslRedirects(false)
                 .build()
         }
 
