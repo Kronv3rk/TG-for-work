@@ -276,6 +276,7 @@ class TelegramProxy(
             routePlanner.markTrying(method, dcId, isMedia)
             lastMessage = routePlanner.status()
 
+            var failureReason = "нет доступного адреса"
             val handled = runCatching {
                 when (method) {
                     RouteMethod.WORKER -> bridgeCfWorker(
@@ -319,14 +320,15 @@ class TelegramProxy(
                     )
                     RouteMethod.TCP -> bridgeTcpFallback(client, dcId, isMedia, clientIn, clientOut, relayInit, crypto)
                 }
-            }.getOrElse {
+            }.getOrElse { error ->
+                failureReason = ConnectionLog.failureReason(error)
                 false
             }
 
             if (handled) return
 
             routePlanner.markFailed(method, dcId, isMedia)
-            ConnectionLog.connectFailed(method, dcId, isMedia, "")
+            ConnectionLog.connectFailed(method, dcId, isMedia, failureReason)
             lastMessage = routePlanner.status()
         }
 
