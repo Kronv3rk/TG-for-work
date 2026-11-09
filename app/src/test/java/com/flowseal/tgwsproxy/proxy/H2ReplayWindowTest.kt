@@ -52,12 +52,14 @@ class H2ReplayWindowTest {
         val window = H2ReplayWindow(clock = { now })
         val entry = window.remember(packet(1))!!
         val original = window.registerOriginal(entry)
+        val secondOriginal = window.registerOriginal(entry)
         window.markSent(original)
+        window.markSent(secondOriginal)
         now += 3_000L
         window.markReceiving(original)
         assertNull(window.nextReplayCandidate())
         window.complete(original)
-        assertNull(window.nextReplayCandidate())
+        assertSame(entry, window.nextReplayCandidate())
     }
 
     @Test
@@ -141,6 +143,25 @@ class H2ReplayWindowTest {
         window.cancelReplay(replay)
         assertEquals(0, window.attemptsForTest(entry))
         assertSame(entry, window.nextReplayCandidate())
+    }
+
+    @Test
+    fun authKeyRotationDoesNotForgetAlreadyReservedReplaySlots() {
+        var now = 1_000L
+        val window = H2ReplayWindow(clock = { now }, maxConcurrentReplays = 1)
+        val oldEntry = window.remember(packet(1, authKey = 1))!!
+        val oldOriginal = window.registerOriginal(oldEntry)
+        window.markSent(oldOriginal)
+        now += 3_000L
+        val oldReplay = window.reserveReplay(oldEntry)!!
+
+        val newEntry = window.remember(packet(2, authKey = 2))!!
+        val newOriginal = window.registerOriginal(newEntry)
+        window.markSent(newOriginal)
+        now += 3_000L
+        assertNull(window.reserveReplay(newEntry))
+        window.complete(oldReplay)
+        assertTrue(window.reserveReplay(newEntry) != null)
     }
 
     private fun packet(key: Int, size: Int = 32, authKey: Int = key): ByteArray =
