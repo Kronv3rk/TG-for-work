@@ -30,7 +30,7 @@ class FakeTlsMaskingProfileProbeTest {
 
     @Test
     fun limitsMalformedRecordSizesAndNeverReadsPastBoundary() {
-        assertNull(FakeTlsMaskingProfileProbe.firstApplicationDataLength(byteArrayOf(0x16, 0x03, 0x03, 0x7f, 0xff)))
+        assertNull(FakeTlsMaskingProfileProbe.firstApplicationDataLength(byteArrayOf(0x16, 0x03, 0x03, 0x7f, 0xff.toByte())))
         assertNull(FakeTlsMaskingProfileProbe.firstApplicationDataLength(byteArrayOf()))
     }
 }
