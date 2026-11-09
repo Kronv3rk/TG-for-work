@@ -33,21 +33,10 @@ import okhttp3.Response
  * H2 remains off by default until real-device replay and resilience testing is
  * complete. WS remains the default and also the fallback after H2 failures.
  */
-internal class CfH2Transport : Closeable {
-    private val dispatcher = Dispatcher().apply {
-        maxRequests = MAX_LANE_REQUESTS
-        maxRequestsPerHost = MAX_LANE_REQUESTS
-    }
-    private val client = OkHttpClient.Builder()
-        .dispatcher(dispatcher)
-        .connectionPool(ConnectionPool(8, 3, TimeUnit.MINUTES))
-        .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .writeTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .callTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(false)
-        .build()
+internal class CfH2Transport(
+    private val client: OkHttpClient = defaultClient()
+) : Closeable {
+    private val dispatcher = client.dispatcher
 
     internal class Lane {
         val requests = Semaphore(MAX_LANE_REQUESTS)
@@ -280,6 +269,23 @@ internal class CfH2Transport : Closeable {
     }
 
     private companion object {
+        fun defaultClient(): OkHttpClient {
+            val dispatcher = Dispatcher().apply {
+                maxRequests = MAX_LANE_REQUESTS
+                maxRequestsPerHost = MAX_LANE_REQUESTS
+            }
+            return OkHttpClient.Builder()
+                .dispatcher(dispatcher)
+                .connectionPool(ConnectionPool(8, 3, TimeUnit.MINUTES))
+                .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .writeTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .callTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(false)
+                .build()
+        }
+
         const val MAX_CONNECT_ATTEMPTS = 3
         const val MAX_CHANNEL_REQUESTS = 8
         const val MAX_LANE_REQUESTS = 64
