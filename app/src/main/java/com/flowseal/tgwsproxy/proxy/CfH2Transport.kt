@@ -278,11 +278,12 @@ internal class CfH2Transport(
 
                     override fun onResponse(call: Call, response: Response) {
                         if (ticket != null) replayWindow.markReceiving(ticket)
+                        else replayWindow.markProgress()
                         try {
                             response.use {
                                 val result = readBoundedReply(response, lane) {
                                     lastProgress.set(System.currentTimeMillis())
-                                    if (ticket != null) replayWindow.markProgress(ticket)
+                                    replayWindow.markProgress(ticket)
                                 }
                                 var queued = false
                                 var queueError: IOException? = null
