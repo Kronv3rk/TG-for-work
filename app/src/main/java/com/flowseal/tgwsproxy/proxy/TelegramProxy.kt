@@ -29,7 +29,8 @@ import kotlin.experimental.xor
 import kotlin.math.abs
 
 class TelegramProxy(
-    private val options: ProxyOptions
+    private val options: ProxyOptions,
+    private val initialHandshakeTimeoutMs: Int = DEFAULT_INITIAL_HANDSHAKE_TIMEOUT_MS
 ) : Closeable {
     private val random = SecureRandom()
 
@@ -80,6 +81,9 @@ class TelegramProxy(
 
     val plainProxyLink: String
         get() = ProxyLinkFormatter.plain(options)
+
+    val boundPort: Int
+        get() = serverSocket?.localPort ?: -1
 
     val isRunning: Boolean
         get() = serverSocket?.isClosed == false
@@ -134,6 +138,7 @@ class TelegramProxy(
             while (!server.isClosed) {
                 try {
                     val socket = server.accept()
+                    socket.soTimeout = initialHandshakeTimeoutMs
                     socket.tcpNoDelay = true
                     socket.keepAlive = true
                     socket.receiveBufferSize = bufferSize
@@ -210,6 +215,8 @@ class TelegramProxy(
                         maskedConnections.incrementAndGet()
                         return
                     }
+                    // Initial handshake must be bounded; established media streams may idle.
+                    client.soTimeout = 0
                     val handshake = streams.handshake
                     val parsed = tryHandshake(handshake)
                     if (parsed == null) {
@@ -848,6 +855,8 @@ class TelegramProxy(
             203 to "91.105.192.100"
         )
 
+
+        private const val DEFAULT_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000
 
         private fun namedDaemonThreads(prefix: String): ThreadFactory {
             val threadNumber = AtomicInteger(1)
