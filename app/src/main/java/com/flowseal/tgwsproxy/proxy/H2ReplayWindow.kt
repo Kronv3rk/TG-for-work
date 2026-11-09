@@ -57,7 +57,9 @@ internal class H2ReplayWindow(
         if (key.all { it == 0.toByte() }) return null
 
         if (authKeyId == null || !authKeyId!!.contentEquals(key)) {
-            clearLocked()
+            // Old requests may still complete after an auth_key_id rotation.
+            // Keep their replay reservations counted until their callbacks finish.
+            clearHistoryLocked()
             authKeyId = key
         }
         entries.firstOrNull { it.body.contentEquals(body) }?.let { return it }
@@ -197,10 +199,14 @@ internal class H2ReplayWindow(
         retained = retained.coerceAtLeast(0)
     }
 
-    private fun clearLocked() {
+    private fun clearHistoryLocked() {
         entries.clear()
         retained = 0
         authKeyId = null
+    }
+
+    private fun clearLocked() {
+        clearHistoryLocked()
         pendingReplays = 0
     }
 }
