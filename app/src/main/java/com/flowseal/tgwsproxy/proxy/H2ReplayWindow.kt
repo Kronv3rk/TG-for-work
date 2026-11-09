@@ -159,18 +159,16 @@ internal class H2ReplayWindow(
     @Synchronized
     fun clear() = clearLocked()
 
-    @Synchronized
     internal val retainedPackets: Int
-        get() {
+        get() = synchronized(this) {
             trimLocked(clock())
-            return entries.size
+            entries.size
         }
 
-    @Synchronized
     internal val retainedBytes: Int
-        get() {
+        get() = synchronized(this) {
             trimLocked(clock())
-            return retained
+            retained
         }
 
     @Synchronized
