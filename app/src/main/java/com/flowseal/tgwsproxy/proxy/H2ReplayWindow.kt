@@ -174,6 +174,7 @@ internal class H2ReplayWindow(
         lastProgressAt = clock()
         if (ticket == null) return true
         val entry = ticket.entry
+        if (!entry.pending.containsKey(ticket.id)) return false
         val replyId = reply.copyOfRange(0, minOf(24, reply.size))
         val previous = entry.replyId
         if (previous != null && previous.contentEquals(replyId)) return false
