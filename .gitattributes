@@ -1,0 +1,23 @@
+# Единые переводы строк в репозитории.
+* text=auto eol=lf
+
+# Скрипты, которым нужен LF даже на Windows.
+gradlew         text eol=lf
+*.sh            text eol=lf
+
+# Windows-скрипты.
+gradlew.bat     text eol=crlf
+
+# Бинарные файлы.
+*.jar           binary
+*.jks           binary
+*.keystore      binary
+*.apk           binary
+*.aab           binary
+*.png           binary
+*.webp          binary
+
+# Сгенерированное и служебное — не шумит в diff и в статистике языков.
+*.patch         -diff linguist-generated=true
+*.b64           -diff linguist-generated=true
+gradle/wrapper/gradle-wrapper.jar   binary linguist-vendored=true
