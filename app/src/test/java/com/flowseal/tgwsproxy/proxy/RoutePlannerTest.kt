@@ -84,6 +84,17 @@ class RoutePlannerTest {
     }
 
     @Test
+    fun experimentalH2IsUsedOnlyForMediaWhenExplicitlyEnabled() {
+        val planner = RoutePlanner()
+        val experimental = options(cf = true, cfPriority = true).copy(cfH2MediaEnabled = true)
+        val media = planner.methodsFor(2, true, experimental)
+        assertEquals(RouteMethod.HTTP2, media.first())
+        assertTrue(media.contains(RouteMethod.CLOUDFLARE))
+        assertFalse(planner.methodsFor(2, false, experimental).contains(RouteMethod.HTTP2))
+        assertFalse(planner.methodsFor(2, true, options()).contains(RouteMethod.HTTP2))
+    }
+
+    @Test
     fun mediaPrioritisesCloudflareWhenEnabled() {
         val planner = RoutePlanner()
         val methods = planner.methodsFor(2, true, options(cf = true, cfPriority = true))
