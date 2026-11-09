@@ -98,12 +98,24 @@ internal class CfH2Transport(
 
     fun open(hosts: List<String>): Channel? {
         if (closed.get()) return null
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(SETUP_TIMEOUT_SECONDS)
         for (host in hosts.take(MAX_CONNECT_ATTEMPTS)) {
             if (System.currentTimeMillis() < (failedUntil[host] ?: 0L)) continue
+
+            // One lane owns the per-origin request and reply budgets. Reuse its
+            // already ALPN-verified OkHttp connection instead of HEAD-probing
+            // Cloudflare for every Telegram media session.
+            val existing = lanes[host]
+            if (existing != null) {
+                return Channel(host, existing).also { channels.add(it) }
+            }
+
             val preflight = runCatching {
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0L) return@runCatching false
                 val request = Request.Builder().url("https://$host/api").head().build()
                 client.newCall(request).also {
-                    it.timeout().timeout(SETUP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    it.timeout().timeout(remaining, TimeUnit.NANOSECONDS)
                 }.execute().use { response ->
                     H2MediaPolicy.isPreflightValid(
                         if (response.protocol == Protocol.HTTP_2) "h2" else "http/1.1",
@@ -113,6 +125,7 @@ internal class CfH2Transport(
             }.getOrDefault(false)
             if (!preflight) {
                 failedUntil[host] = System.currentTimeMillis() + DOMAIN_COOLDOWN_MS
+                if (System.nanoTime() >= deadline) return null
                 continue
             }
             val lane = lanes.computeIfAbsent(host) { Lane() }
@@ -475,7 +488,10 @@ internal class CfH2Transport(
                 }
             }
             val bytes = result.toByteArray()
-            if (declared >= 0 && bytes.size.toLong() != declared) {
+            val encoding = response.header("Content-Encoding") ?: "identity"
+            if (declared >= 0 && encoding.equals("identity", ignoreCase = true) &&
+                bytes.size.toLong() != declared
+            ) {
                 throw IOException("Truncated H2 response body")
             }
             if (bytes.isEmpty()) return ReadReply(bytes, reserved)
