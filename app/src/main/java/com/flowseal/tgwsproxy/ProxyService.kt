@@ -45,41 +45,46 @@ class ProxyService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Before the user unlocks the device after a reboot the settings store is
-        // unreadable, so starting here would refuse to run rather than mint a new
-        // identity. Stay alive and let a later start command bring the proxy up.
-        // Stop must work even while credential-protected settings are locked.
-        // Otherwise a user-issued STOP can be ignored before dispatch.
+        // An Android foreground-service start must either become foreground promptly
+        // or finish. Never keep an unstarted service alive while storage is locked.
         if (intent?.action == ACTION_STOP) {
             stopNetworkMonitoring()
             ProxyRuntime.stop()
             ProxyKeepAlive.release()
             stopForegroundCompat()
-            stopSelf()
+            stopSelf(startId)
             return START_NOT_STICKY
         }
-        if (!canStartProxy()) return START_STICKY
-        when (intent?.action ?: ACTION_START) {
-            ACTION_OPEN_TELEGRAM -> {
-                ProxyRuntime.start(this)
-                startForegroundCompat()
-                ProxyRuntime.openTelegram(this)
-            }
-            ACTION_COPY_LINK -> {
-                ProxyRuntime.start(this)
-                startForegroundCompat()
-                ProxyRuntime.copyLink(this)
-            }
-            ACTION_RESTART -> {
-                ProxyRuntime.restart(this)
-                startForegroundCompat()
-            }
-            else -> {
-                ProxyRuntime.start(this)
-                startForegroundCompat()
-            }
+        if (!canStartProxy()) {
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
-        return START_STICKY
+        return try {
+            // Promote before networking: binding a local port or loading a route
+            // can throw, and cannot be allowed to crash the main service thread.
+            startForegroundCompat()
+            when (intent?.action ?: ACTION_START) {
+                ACTION_OPEN_TELEGRAM -> {
+                    ProxyRuntime.start(this)
+                    ProxyRuntime.openTelegram(this)
+                }
+                ACTION_COPY_LINK -> {
+                    ProxyRuntime.start(this)
+                    ProxyRuntime.copyLink(this)
+                }
+                ACTION_RESTART -> ProxyRuntime.restart(this)
+                else -> ProxyRuntime.start(this)
+            }
+            START_STICKY
+        } catch (error: Exception) {
+            ConnectionLog.info("Не удалось запустить локальный прокси: ${error.javaClass.simpleName}")
+            stopNetworkMonitoring()
+            ProxyRuntime.stop()
+            ProxyKeepAlive.release()
+            runCatching { stopForegroundCompat() }
+            stopSelf(startId)
+            START_NOT_STICKY
+        }
     }
 
     private fun canStartProxy(): Boolean {

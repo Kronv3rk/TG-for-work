@@ -52,8 +52,13 @@ object ProxyRuntime {
             }
         }
         val created = TelegramProxy(options)
+        try {
+            created.start()
+        } catch (error: Exception) {
+            created.close()
+            throw error
+        }
         proxy = created
-        created.start()
         return created
     }
 
