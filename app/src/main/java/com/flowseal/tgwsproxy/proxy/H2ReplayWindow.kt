@@ -49,6 +49,7 @@ internal class H2ReplayWindow(
     private var nextSequence = 0L
     private var nextTicket = 0L
     private var pendingReplays = 0
+    private var lastProgressAt = clock()
 
     @Synchronized
     fun remember(body: ByteArray): Entry? {
@@ -88,6 +89,12 @@ internal class H2ReplayWindow(
     @Synchronized
     fun markReceiving(ticket: Ticket) {
         ticket.entry.pending[ticket.id]?.receiving = true
+        lastProgressAt = clock()
+    }
+
+    @Synchronized
+    fun markProgress(ticket: Ticket) {
+        if (ticket.entry.pending.containsKey(ticket.id)) lastProgressAt = clock()
     }
 
     @Synchronized
@@ -106,13 +113,19 @@ internal class H2ReplayWindow(
             val waiting = entry.pending.values.any { request ->
                 request.sentAt?.let { !request.receiving && now - it >= requestTimeoutMs } == true
             }
+            val anotherRequestPending = entries.any { other ->
+                other !== entry && other.pending.isNotEmpty()
+            }
+            val latestIdlePoll = entry === entries.lastOrNull() &&
+                entry.pending.isEmpty() && !anotherRequestPending &&
+                now - lastProgressAt >= IDLE_POLL_MS
             age in 0..maxAgeMs &&
                 entry.firstSentAt?.let { now - it <= maxAgeMs } == true &&
                 entry.attempts < maxAttempts &&
                 (entry.lastAttemptAt == null || now - entry.lastAttemptAt!! >= retryDelayMs) &&
                 entry.pending.values.none { it.replay } &&
                 entry.pending.values.none { it.receiving } &&
-                waiting
+                (waiting || latestIdlePoll)
         }
     }
 
@@ -145,6 +158,7 @@ internal class H2ReplayWindow(
         if (ticket == null) return true
         val entry = ticket.entry
         val replyId = reply.copyOfRange(0, minOf(24, reply.size))
+        lastProgressAt = clock()
         val previous = entry.replyId
         if (previous != null && previous.contentEquals(replyId)) return false
         entry.replyId = replyId
@@ -194,6 +208,10 @@ internal class H2ReplayWindow(
             retained -= victim.body.size
         }
         retained = retained.coerceAtLeast(0)
+    }
+
+    private companion object {
+        const val IDLE_POLL_MS = 1_000L
     }
 
     private fun clearHistoryLocked() {
