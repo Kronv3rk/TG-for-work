@@ -48,6 +48,6 @@ jobs:
             echo "Release $TAG already exists; no new APK will be published."
             exit 0
           fi
-          gh workflow run android-release.yml --ref main -f release_tag="$TAG" \
+          gh workflow run android-release.yml --ref main -f tag="$TAG" \
             --repo "$GITHUB_REPOSITORY"
           echo "Requested signed Android release $TAG"
