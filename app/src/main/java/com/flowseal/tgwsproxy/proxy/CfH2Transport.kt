@@ -49,7 +49,7 @@ internal class CfH2Transport : Closeable {
         .retryOnConnectionFailure(false)
         .build()
 
-    private class Lane {
+    internal class Lane {
         val requests = Semaphore(MAX_LANE_REQUESTS)
         val lock = Any()
         var pendingBytes = 0
@@ -155,7 +155,9 @@ internal class CfH2Transport : Closeable {
                     override fun onResponse(call: Call, response: Response) {
                         try {
                             response.use {
-                                val reply = readBoundedReply(response)
+                                val reply = readBoundedReply(response) {
+                                    lastProgress.set(System.currentTimeMillis())
+                                }
                                 if (!closed.get()) {
                                     val after = queuedBytes.addAndGet(reply.size)
                                     if (after > MAX_CHANNEL_BYTES || !queuedReplies.offer(reply)) {
@@ -230,7 +232,7 @@ internal class CfH2Transport : Closeable {
     }
 
     @Throws(IOException::class)
-    private fun readBoundedReply(response: Response): ByteArray {
+    private fun readBoundedReply(response: Response, onProgress: () -> Unit): ByteArray {
         val protocol = if (response.protocol == Protocol.HTTP_2) "h2" else "http/1.1"
         val type = response.header("Content-Type")
         if (protocol != "h2" || response.code != 200 ||
@@ -256,6 +258,7 @@ internal class CfH2Transport : Closeable {
                     throw IOException("H2 response exceeds size limit")
                 }
                 result.write(buf, 0, count)
+                onProgress()
             }
         }
         val bytes = result.toByteArray()
