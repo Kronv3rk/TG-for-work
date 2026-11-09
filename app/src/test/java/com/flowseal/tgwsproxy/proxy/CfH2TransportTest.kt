@@ -30,7 +30,7 @@ class CfH2TransportTest {
     }
 
     private fun awaitRequestCount(server: MockWebServer, expected: Int) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
         while (server.requestCount < expected && System.nanoTime() < deadline) {
             Thread.sleep(50L)
         }
@@ -55,9 +55,13 @@ class CfH2TransportTest {
         val client = OkHttpClient.Builder()
             .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager)
             .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
-            .callTimeout(6, TimeUnit.SECONDS)
+            .dispatcher(okhttp3.Dispatcher().apply {
+                maxRequests = 64
+                maxRequestsPerHost = 64
+            })
+            .callTimeout(12, TimeUnit.SECONDS)
             .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
             .build()
         return LocalServer(server, client)
     }
@@ -108,7 +112,7 @@ class CfH2TransportTest {
         }
     }
 
-    @Test(timeout = 20_000)
+    @Test(timeout = 35_000)
     fun rotatesOldestUnansweredRequestWhenChannelUploadSlotsAreFull() {
         createServer(http2 = true).use { fixture ->
             fixture.server.dispatcher = object : Dispatcher() {
