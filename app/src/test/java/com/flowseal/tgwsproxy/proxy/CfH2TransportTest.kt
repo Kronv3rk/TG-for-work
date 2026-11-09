@@ -98,6 +98,38 @@ class CfH2TransportTest {
     }
 
     @Test(timeout = 15_000)
+    fun reusesOnePreflightedOriginLaneAcrossTelegramMediaChannels() {
+        createServer(http2 = true).use { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(200))
+            val firstReply = ByteArray(24) { 1 }
+            val secondReply = ByteArray(24) { 2 }
+            fixture.server.enqueue(
+                MockResponse().addHeader("Content-Type", "application/octet-stream")
+                    .setBody(Buffer().write(firstReply))
+            )
+            fixture.server.enqueue(
+                MockResponse().addHeader("Content-Type", "application/octet-stream")
+                    .setBody(Buffer().write(secondReply))
+            )
+            val transport = CfH2Transport(fixture.client)
+            try {
+                val endpoint = "localhost:${fixture.server.port}"
+                val first = transport.open(listOf(endpoint))!!
+                val second = transport.open(listOf(endpoint))!!
+                first.send(ByteArray(24).also { it[0] = 1 })
+                second.send(ByteArray(24).also { it[0] = 1; it[8] = 2 })
+                assertArrayEquals(firstReply, first.receive())
+                assertArrayEquals(secondReply, second.receive())
+                assertEquals("one HEAD preflight and two multiplexed POSTs", 3, fixture.server.requestCount)
+                first.close()
+                second.close()
+            } finally {
+                transport.close()
+            }
+        }
+    }
+
+    @Test(timeout = 15_000)
     fun retriesAStalledResponseAndSuppressesTheLateDuplicate() {
         createServer(http2 = true).use { fixture ->
             fixture.server.enqueue(MockResponse().setResponseCode(200))
