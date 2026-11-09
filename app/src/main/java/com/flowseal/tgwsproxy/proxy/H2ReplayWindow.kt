@@ -107,7 +107,7 @@ internal class H2ReplayWindow(
     }
 
     @Synchronized
-    fun nextReplayCandidate(): Entry? {
+    fun nextReplayCandidate(allowLatestIdlePoll: Boolean = true): Entry? {
         val now = clock()
         trimLocked(now)
         return entries.firstOrNull { entry ->
@@ -118,7 +118,7 @@ internal class H2ReplayWindow(
             val anotherRequestPending = entries.any { other ->
                 other !== entry && other.pending.isNotEmpty()
             }
-            val latestIdlePoll = entry === entries.lastOrNull() &&
+            val latestIdlePoll = allowLatestIdlePoll && entry === entries.lastOrNull() &&
                 entry.pending.isEmpty() && !anotherRequestPending &&
                 now - lastProgressAt >= IDLE_POLL_MS
             age in 0..maxAgeMs &&
@@ -132,8 +132,10 @@ internal class H2ReplayWindow(
     }
 
     @Synchronized
-    fun reserveReplay(entry: Entry): Ticket? {
-        if (pendingReplays >= maxConcurrentReplays || nextReplayCandidate() !== entry) return null
+    fun reserveReplay(entry: Entry, allowLatestIdlePoll: Boolean = true): Ticket? {
+        if (pendingReplays >= maxConcurrentReplays ||
+            nextReplayCandidate(allowLatestIdlePoll) !== entry
+        ) return null
         val now = clock()
         entry.attempts += 1
         entry.lastAttemptAt = now
