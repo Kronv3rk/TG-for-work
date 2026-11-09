@@ -35,6 +35,21 @@ class RoutePlannerTest {
     }
 
     @Test
+    fun laterFallbackDomainsHaveShorterConnectBudgets() {
+        val planner = RoutePlanner()
+        assertEquals(8_000, planner.connectTimeoutMs(RouteMethod.CLOUDFLARE, 2, true, attempt = 0))
+        assertEquals(4_000, planner.connectTimeoutMs(RouteMethod.CLOUDFLARE, 2, true, attempt = 1))
+        assertEquals(4_000, planner.connectTimeoutMs(RouteMethod.CLOUDFLARE, 2, true, attempt = 2))
+    }
+
+    @Test
+    fun probationRemainsShorterThanFallbackDomainBudget() {
+        val planner = RoutePlanner()
+        planner.markFailed(RouteMethod.CLOUDFLARE, 2, true)
+        assertEquals(3_000, planner.connectTimeoutMs(RouteMethod.CLOUDFLARE, 2, true, attempt = 1))
+    }
+
+    @Test
     fun successClearsProbation() {
         val planner = RoutePlanner()
         planner.markFailed(RouteMethod.WEBSOCKET, 2, false)
