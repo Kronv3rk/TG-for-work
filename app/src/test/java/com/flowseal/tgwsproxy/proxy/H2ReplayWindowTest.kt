@@ -179,6 +179,25 @@ class H2ReplayWindowTest {
         assertSame(entry, window.nextReplayCandidate())
     }
 
+    @Test
+    fun untrackedReplyProgressDelaysIdleReplayOfThePreviousTrackedPacket() {
+        var now = 1_000L
+        val window = H2ReplayWindow(clock = { now })
+        val entry = window.remember(packet(1))!!
+        val original = window.registerOriginal(entry)
+        window.markSent(original)
+        window.markReceiving(original)
+        window.complete(original)
+
+        now += 900L
+        assertNull(window.nextReplayCandidate())
+        window.acceptReply(null, ByteArray(24) { 4 })
+        now += 999L
+        assertNull(window.nextReplayCandidate())
+        now += 1L
+        assertSame(entry, window.nextReplayCandidate())
+    }
+
     private fun packet(key: Int, size: Int = 32, authKey: Int = key): ByteArray =
         ByteArray(size).also {
             it[0] = authKey.toByte()
