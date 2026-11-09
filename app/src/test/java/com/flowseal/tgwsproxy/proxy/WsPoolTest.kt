@@ -24,13 +24,14 @@ class WsPoolTest {
     private val opened = mutableListOf<FakeSocket>()
     private var connects = 0
     private var failConnect = false
+    private val failedDomains = mutableSetOf<String>()
 
     /** Background work runs inline, so every refill is finished when get()/maintain() return. */
     private val pool = WsPool(
         size = 2,
         connector = { _, domain ->
             connects++
-            if (failConnect) throw IOException("timeout")
+            if (failConnect || domain in failedDomains) throw IOException("timeout")
             FakeSocket(domain).also { opened += it }
         },
         isOpen = { it.open },
@@ -97,18 +98,29 @@ class WsPoolTest {
     fun failedRefillBacksOffExponentially() {
         failConnect = true
         pool.get(key, "149.154.167.220", domains)
-        assertEquals(1, connects)
-        pool.maintain()
-        assertEquals(1, connects)
-        now += WsPool.BACKOFF_INITIAL_MS
+        assertEquals(2, connects)
         pool.maintain()
         assertEquals(2, connects)
         now += WsPool.BACKOFF_INITIAL_MS
         pool.maintain()
-        assertEquals(2, connects)
+        assertEquals(4, connects)
         now += WsPool.BACKOFF_INITIAL_MS
         pool.maintain()
-        assertEquals(3, connects)
+        assertEquals(4, connects)
+        now += WsPool.BACKOFF_INITIAL_MS
+        pool.maintain()
+        assertEquals(6, connects)
+    }
+
+    @Test
+    fun failedFirstRelayDomainDoesNotHideWorkingSecondDomain() {
+        failedDomains += domains.first()
+        assertNull(pool.get(key, "149.154.167.220", domains))
+        assertEquals(4, connects)
+        assertEquals(2, pool.idleCount(key))
+        assertTrue(opened.all { it.domain == domains[1] })
+        val next = pool.get(key, "149.154.167.220", domains)
+        assertNotNull(next)
     }
 
     @Test

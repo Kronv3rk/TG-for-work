@@ -27,7 +27,9 @@ class WebSocketHandshakeException(
 class RawWebSocket private constructor(
     private val socket: SSLSocket,
     private val input: BufferedInputStream,
-    private val output: BufferedOutputStream
+    private val output: BufferedOutputStream,
+    /** The TCP connection used fronting SNI rather than the relay hostname. */
+    val isFronted: Boolean
 ) : Closeable {
     @Volatile
     private var closed = false
@@ -41,6 +43,15 @@ class RawWebSocket private constructor(
         if (closed) throw EOFException("WebSocket closed")
         synchronized(output) {
             WebSocketFrameWriter.writeBinary(output, data, random)
+            output.flush()
+        }
+    }
+
+    /** One flush per decrypted MTProto read, rather than per frame. */
+    fun sendBinaryBatch(packets: List<ByteArray>) {
+        if (closed) throw EOFException("WebSocket closed")
+        synchronized(output) {
+            WebSocketFrameWriter.writeBinaryBatch(output, packets, random)
             output.flush()
         }
     }
@@ -251,7 +262,7 @@ class RawWebSocket private constructor(
                 // Keep an idle read budget instead of blocking forever: receive()
                 // uses it to drive keepalive pings and to detect dead relays.
                 connectedSsl.soTimeout = IDLE_TIMEOUT_MS
-                return RawWebSocket(connectedSsl, input, output)
+                return RawWebSocket(connectedSsl, input, output, isFronted = sni != null)
             } catch (error: Exception) {
                 runCatching { ssl?.close() }
                 runCatching { plain.close() }

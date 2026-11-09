@@ -20,8 +20,11 @@ data class ClientStreams(
     val output: OutputStream
 )
 
-class FakeTls(private val secret: ByteArray, private val maskingDomain: String) {
-    private val random = SecureRandom()
+class FakeTls(
+    private val secret: ByteArray,
+    private val maskingDomain: String,
+    private val profiledApplicationDataLength: Int? = null
+) {
 
     fun readClientStreams(rawInput: BufferedInputStream, rawOutput: BufferedOutputStream): ClientStreams? {
         val first = rawInput.read()
@@ -43,7 +46,15 @@ class FakeTls(private val secret: ByteArray, private val maskingDomain: String) 
                     proxyToMaskingDomain(rawInput, rawOutput, clientHello)
                     return null
                 }
-                rawOutput.write(buildServerHello(result.clientRandom, result.sessionId))
+                // Follow upstream's 8–24 ms ServerHello pacing and reflect the
+                // actual cipher/key_share offered in this authenticated ClientHello.
+                Thread.sleep(8L + java.util.concurrent.ThreadLocalRandom.current().nextLong(17L))
+                rawOutput.write(
+                    FakeTlsHandshakeProfile.buildServerHello(
+                        secret, result.clientRandom, result.sessionId, clientHello,
+                        profiledApplicationDataLength
+                    )
+                )
                 rawOutput.flush()
                 val fakeInput = FakeTlsInputStream(rawInput)
                 val fakeOutput = FakeTlsOutputStream(rawOutput)
@@ -89,27 +100,6 @@ class FakeTls(private val secret: ByteArray, private val maskingDomain: String) 
             ByteArray(SESSION_ID_LEN)
         }
         return VerifyResult(clientRandom, sessionId)
-    }
-
-    private fun buildServerHello(clientRandom: ByteArray, sessionId: ByteArray): ByteArray {
-        val hello = SERVER_HELLO_TEMPLATE.copyOf()
-        System.arraycopy(sessionId, 0, hello, SERVER_HELLO_SESSION_ID_OFFSET, SESSION_ID_LEN)
-        val publicKey = ByteArray(32).also(random::nextBytes)
-        System.arraycopy(publicKey, 0, hello, SERVER_HELLO_PUBLIC_KEY_OFFSET, publicKey.size)
-
-        val encryptedData = ByteArray(random.nextInt(201) + 1900).also(random::nextBytes)
-        val appRecord = byteArrayOf(
-            TLS_RECORD_APPDATA.toByte(),
-            0x03,
-            0x03,
-            ((encryptedData.size shr 8) and 0xFF).toByte(),
-            (encryptedData.size and 0xFF).toByte()
-        ) + encryptedData
-        val response = hello + CCS_FRAME + appRecord
-        val serverRandom = hmacSha256(secret, clientRandom + response)
-        return response.copyOf().also {
-            System.arraycopy(serverRandom, 0, it, SERVER_HELLO_RANDOM_OFFSET, 32)
-        }
     }
 
     private fun proxyToMaskingDomain(
@@ -160,26 +150,6 @@ class FakeTls(private val secret: ByteArray, private val maskingDomain: String) 
         private const val TLS_APPDATA_MAX = 16_384
         private const val BUFFER_SIZE = 16 * 1024
         private val CCS_FRAME = byteArrayOf(0x14, 0x03, 0x03, 0x00, 0x01, 0x01)
-        private const val SERVER_HELLO_RANDOM_OFFSET = 11
-        private const val SERVER_HELLO_SESSION_ID_OFFSET = 44
-        private const val SERVER_HELLO_PUBLIC_KEY_OFFSET = 89
-        private val SERVER_HELLO_TEMPLATE = byteArrayOf(
-            0x16, 0x03, 0x03, 0x00, 0x7a,
-            0x02, 0x00, 0x00, 0x76,
-            0x03, 0x03,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0x20,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0x13, 0x01, 0x00,
-            0x00, 0x2e,
-            0x00, 0x33, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0x00, 0x2b, 0x00, 0x02, 0x03, 0x04
-        )
-
         fun wrapTlsRecords(data: ByteArray): ByteArray {
             // Write directly to one buffer; repeated byte-array concatenation was
             // quadratic for large media payloads split into many TLS records.

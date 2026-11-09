@@ -53,7 +53,7 @@ internal object WebSocketProtocol {
         }
     }
 
-    const val MAX_FRAME_BYTES = 8L * 1024 * 1024
+    const val MAX_FRAME_BYTES = 16L * 1024 * 1024
 }
 
 internal class WebSocketMessageAssembler(private val maxBytes: Int) {

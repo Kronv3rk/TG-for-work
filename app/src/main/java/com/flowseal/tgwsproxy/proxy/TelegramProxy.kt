@@ -67,9 +67,21 @@ class TelegramProxy(
 
     /** Pool refills dial on their own threads so they never take a client's slot in [executor]. */
     private val poolExecutor = Executors.newCachedThreadPool(namedDaemonThreads("tg-ws-pool"))
+    private val frontingDialer = FrontingDialer(
+        normal = { host: String, domain: String ->
+            RawWebSocket.connect(host, domain, WsPool.CONNECT_TIMEOUT_MS)
+        },
+        fronted = { host: String, domain: String ->
+            RawWebSocket.connect(
+                host, domain, WsPool.CONNECT_TIMEOUT_MS - 1_000,
+                sni = options.frontingSni.trim()
+            )
+        },
+        enabled = { options.frontingEnabled && options.frontingSni.isNotBlank() }
+    )
     private val wsPool = WsPool(
         size = WsPool.DEFAULT_SIZE,
-        connector = { host, domain -> RawWebSocket.connect(host, domain, WsPool.CONNECT_TIMEOUT_MS) },
+        connector = frontingDialer::connect,
         isOpen = RawWebSocket::isOpen,
         isTargetBlocked = { routePlanner.isTargetBlocked(it) },
         isActive = { networkOptions.wsPoolActive },
@@ -90,6 +102,9 @@ class TelegramProxy(
         isActive = { networkOptions.wsPoolActive && options.cfWorkerEnabled },
         background = { poolExecutor.execute(it) }
     )
+
+    @Volatile
+    private var maskingProfileLength: Int? = null
 
     @Volatile
     private var poolMaintenance: ScheduledExecutorService? = null
@@ -128,6 +143,7 @@ class TelegramProxy(
 
     private fun invalidateNetworkRoutes() {
         routePlanner.resetNetworkState()
+        frontingDialer.reset()
         wsPool.clear()
         workerPool.clear()
         h2Transport?.resetNetwork()
@@ -148,6 +164,14 @@ class TelegramProxy(
         val server = ServerSocket(options.port, 50, address)
         server.reuseAddress = true
         serverSocket = server
+        if (options.fakeTlsEnabled && options.fakeTlsDomain.isNotBlank()) {
+            // One short, bounded probe per listener startup. Never perform an
+            // outbound TLS handshake on Android's main or socket-accept thread.
+            poolExecutor.execute {
+                val measured = FakeTlsMaskingProfileProbe.probe(options.fakeTlsDomain)
+                if (isRunning) maskingProfileLength = measured
+            }
+        }
         if (options.wsPoolEnabled && poolMaintenance == null) {
             poolMaintenance = WsPool.startMaintenance(wsPool, workerPool::maintain)
         }
@@ -244,7 +268,7 @@ class TelegramProxy(
         try {
             BufferedInputStream(client.getInputStream()).use { rawIn ->
                 BufferedOutputStream(client.getOutputStream()).use { rawOut ->
-                    val fakeTls = FakeTls(secretBytes, options.fakeTlsDomain)
+                    val fakeTls = FakeTls(secretBytes, options.fakeTlsDomain, maskingProfileLength)
                     val streams = fakeTls.readClientStreams(rawIn, rawOut) ?: run {
                         maskedConnections.incrementAndGet()
                         return
@@ -380,11 +404,13 @@ class TelegramProxy(
         if (networkOptions.wsPoolActive) {
             val pooled = wsPool.get(WsPool.Key(dcId, isMedia), host, domains)
             if (pooled != null) {
-                wsConnections.incrementAndGet()
-                // No dial happened, so there is no latency sample to feed the route health.
-                routePlanner.markConnected(RouteMethod.WEBSOCKET, dcId, isMedia)
-                ConnectionLog.connected(RouteMethod.WEBSOCKET, dcId, isMedia, 0L, "пул · via $host")
-                relayOverWebSocket(RouteMethod.WEBSOCKET, dcId, isMedia, client, clientIn, clientOut, pooled, relayInit, crypto, splitter, fromPool = true)
+                val method = if (pooled.isFronted) RouteMethod.FRONTING else RouteMethod.WEBSOCKET
+                if (pooled.isFronted) frontingConnections.incrementAndGet()
+                else wsConnections.incrementAndGet()
+                // Retain the selected TLS mode in the diagnostic and route score.
+                routePlanner.markConnected(method, dcId, isMedia)
+                ConnectionLog.connected(method, dcId, isMedia, 0L, "пул · via $host")
+                relayOverWebSocket(method, dcId, isMedia, client, clientIn, clientOut, pooled, relayInit, crypto, splitter, fromPool = true)
                 return true
             }
         }
@@ -794,11 +820,11 @@ class TelegramProxy(
                     val plain = crypto.clientDecrypt.update(buffer, 0, read)
                     val encrypted = crypto.telegramEncrypt.update(plain)
                     val parts = splitter?.split(encrypted) ?: listOf(encrypted)
-                    for (part in parts) {
-                        if (part.isNotEmpty()) ws.sendBinary(part)
-                    }
+                    if (parts.any { it.isNotEmpty() }) ws.sendBinaryBatch(parts)
                 }
-                splitter?.flush()?.forEach { if (it.isNotEmpty()) ws.sendBinary(it) }
+                splitter?.flush()?.let { tail ->
+                    if (tail.any { it.isNotEmpty() }) ws.sendBinaryBatch(tail)
+                }
             } finally {
                 done.set(1)
                 runCatching { ws.close() }

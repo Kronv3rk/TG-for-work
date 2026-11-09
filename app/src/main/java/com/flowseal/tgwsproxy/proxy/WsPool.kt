@@ -28,7 +28,8 @@ class WsPool<T : Closeable>(
     private val isTargetBlocked: (String) -> Boolean,
     private val isActive: () -> Boolean,
     private val background: (Runnable) -> Unit,
-    private val clock: () -> Long = System::currentTimeMillis
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val maxAgeMs: Long = MAX_AGE_MS
 ) : Closeable {
     data class Key(val dcId: Int, val isMedia: Boolean)
 
@@ -73,7 +74,7 @@ class WsPool<T : Closeable>(
             slot.lastUsedAt = now
             while (result == null) {
                 val pooled = slot.idle.pollFirst() ?: break
-                if (now - pooled.createdAt < MAX_AGE_MS && isOpen(pooled.ws)) {
+                if (now - pooled.createdAt < maxAgeMs && isOpen(pooled.ws)) {
                     result = pooled.ws
                 } else {
                     quietClose(pooled.ws)
@@ -98,7 +99,7 @@ class WsPool<T : Closeable>(
                 val iterator = slot.idle.iterator()
                 while (iterator.hasNext()) {
                     val pooled = iterator.next()
-                    if (now - pooled.createdAt >= MAX_AGE_MS || !isOpen(pooled.ws)) {
+                    if (now - pooled.createdAt >= maxAgeMs || !isOpen(pooled.ws)) {
                         iterator.remove()
                         quietClose(pooled.ws)
                     }
@@ -184,10 +185,13 @@ class WsPool<T : Closeable>(
         for (domain in slot.domains) {
             try {
                 return connector(slot.host, domain)
-            } catch (redirect: WebSocketHandshakeException) {
-                if (!redirect.isRedirect) return null
+            } catch (ignored: WebSocketHandshakeException) {
+                // Another domain may be healthy even when this relay returns
+                // HTTP 4xx/5xx or a redirect. Follow upstream's full fallback
+                // sequence, then back off only if every candidate fails.
+                continue
             } catch (ignored: Exception) {
-                return null
+                continue
             }
         }
         return null
