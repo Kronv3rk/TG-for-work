@@ -32,6 +32,16 @@ class ComparisonTests(unittest.TestCase):
         self.httpx["accepted"] = False
         self.assertFalse(compare(self.httpx, self.okhttp)["both_accepted"])
 
+    def test_rejects_forged_success_if_protocol_is_http11(self):
+        self.httpx["http_version"] = "HTTP/1.1"
+        self.httpx["accepted"] = True
+        self.assertFalse(compare(self.httpx, self.okhttp)["both_accepted"])
+
+    def test_rejects_forged_success_if_http_status_is_unacceptable(self):
+        self.okhttp["http_status"] = 302
+        self.okhttp["accepted"] = True
+        self.assertFalse(compare(self.httpx, self.okhttp)["both_accepted"])
+
     def test_unexpected_probe_scope_is_rejected(self):
         self.okhttp["scope"] = "native_mtproto_data_plane"
         with self.assertRaises(ValueError):
