@@ -65,6 +65,44 @@ class WorkerPoolTest {
     }
 
     @Test
+    fun ignoresDuplicateWorkerDomainsLikeUpstreamWithoutRepeatingFailedConnections() {
+        val attempted = mutableListOf<String>()
+        val pool = WorkerPool<FakeConnection>(
+            size = 1,
+            connector = { _, _, domain ->
+                attempted += domain
+                throw IllegalStateException("Worker unavailable")
+            },
+            isOpen = { it.open },
+            isActive = { true },
+            background = { it.run() }
+        )
+        assertNull(pool.get(
+            2, "149.154.167.51",
+            listOf("offline.example", "offline.example", "fallback.example", "fallback.example")
+        ))
+        assertEquals(listOf("offline.example", "fallback.example"), attempted)
+        pool.close()
+    }
+
+    @Test
+    fun sameWorkerPoolSurvivesDuplicateEntriesInUpdatedConfiguration() {
+        val opened = mutableListOf<FakeConnection>()
+        val pool = WorkerPool(
+            size = 1,
+            connector = { _, _, _ -> FakeConnection().also(opened::add) },
+            isOpen = { it.open },
+            isActive = { true },
+            background = { it.run() }
+        )
+        assertNull(pool.get(2, "149.154.167.51", listOf("worker.example", "worker.example")))
+        val cached = opened.single()
+        assertNotNull(pool.get(2, "149.154.167.51", listOf("worker.example")))
+        assertTrue("A harmless duplicate must not invalidate the cached socket", cached.open)
+        pool.close()
+    }
+
+    @Test
     fun wifiOnlyAndNetworkChangeCloseIdleSockets() {
         var active = true
         val opened = mutableListOf<FakeConnection>()

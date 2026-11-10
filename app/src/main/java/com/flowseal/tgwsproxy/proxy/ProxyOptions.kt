@@ -48,6 +48,9 @@ data class ProxyOptions(
             .split(',', ' ', '\n', '\t')
             .map { it.trim() }
             .filter { it.isNotEmpty() }
+            // Matches upstream Worker available_domains() without retaining
+            // redundant DNS/TLS fallback attempts; order stays stable for pooling.
+            .distinct()
 
     /**
      * User overrides for Telegram data-center addresses, written as `dc:ip` pairs
