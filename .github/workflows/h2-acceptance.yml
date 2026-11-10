@@ -32,7 +32,7 @@ jobs:
           chmod +x ./gradlew
           ./gradlew --no-daemon :app:testDebugUnitTest --tests 'com.flowseal.tgwsproxy.proxy.CfH2TransportTest' --tests 'com.flowseal.tgwsproxy.proxy.CloudflareH2PreflightTest'
       - name: Run acceptance report parser tests
-        run: python3 -m unittest discover -s scripts/tests -p 'test_*h2_preflight.py' -v
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
       - name: Upload local acceptance results
         if: always()
         uses: actions/upload-artifact@v4
@@ -51,7 +51,7 @@ jobs:
     timeout-minutes: 20
     env:
       TG_H2_PROBE_HOST: ${{ inputs.h2_host }}
-      TG_H2_PROBE_JSON: acceptance-report/okhttp.json
+      TG_H2_PROBE_JSON: ${{ github.workspace }}/acceptance-report/okhttp.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
