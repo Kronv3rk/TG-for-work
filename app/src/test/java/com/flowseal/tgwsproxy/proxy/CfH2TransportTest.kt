@@ -322,7 +322,7 @@ class CfH2TransportTest {
     }
 
     @Test(timeout = 10_000)
-    fun mapsRateLimitingToNativeErrorAndTemporarilyDemotesOrigin() {
+    fun mapsRateLimitingToNativeErrorAndRecoversAfterNetworkReset() {
         createServer(http2 = true).use { fixture ->
             fixture.server.enqueue(MockResponse().setResponseCode(200))
             fixture.server.enqueue(MockResponse().setResponseCode(429))
@@ -339,8 +339,8 @@ class CfH2TransportTest {
                 )
                 assertTrue(channel.failed)
                 channel.close()
-                // Do not retry a failing domain indefinitely within the cooldown.
-                // A new channel still requires a successful HEAD preflight.
+                // Network reset discards the existing lane and forces a
+                // fresh TLS/ALPN preflight before reopening this endpoint.
                 transport.resetNetwork()
                 fixture.server.enqueue(MockResponse().setResponseCode(200))
                 assertNotNull(transport.open(listOf(host)))
