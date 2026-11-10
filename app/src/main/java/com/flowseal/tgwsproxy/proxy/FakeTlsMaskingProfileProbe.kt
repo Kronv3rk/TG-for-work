@@ -32,7 +32,9 @@ internal object FakeTlsMaskingProfileProbe {
             val recordLen = ((flight[pos + 3].toInt() and 0xff) shl 8) or
                 (flight[pos + 4].toInt() and 0xff)
             if (type == 0x17) {
-                return if (flight.size - pos - 5 >= recordLen) recordLen else null
+                // The upstream probe measures the record from its header.
+                // Waiting for all encrypted bytes can stall the short TLS probe.
+                return recordLen
             }
             if (type != 0x16 && type != 0x14) return 0
             if (flight.size - pos - 5 < recordLen) return null
