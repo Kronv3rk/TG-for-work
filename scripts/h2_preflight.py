@@ -19,7 +19,9 @@ NON_PUBLIC_TLDS = frozenset({"localhost", "local", "internal", "test", "invalid"
 
 
 def validated_public_host(raw: str) -> str:
-    host = raw.strip().lower()
+    host = raw.lower()
+    if host != host.strip():
+        raise ValueError("Whitespace is not permitted around public hostnames")
     if len(host) > 253 or not host or any(c in host for c in "/:@?#\\ "):
         raise ValueError("Provide a DNS hostname only, without scheme, port, path, credentials or spaces")
     try:
