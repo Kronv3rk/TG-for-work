@@ -336,6 +336,7 @@ class MainActivity : AppCompatActivity() {
         val maxConnInput = view.findViewById<EditText>(R.id.maxConnInput)
         val poolCheck = view.findViewById<CheckBox>(R.id.wsPoolCheck)
         val h2MediaCheck = view.findViewById<CheckBox>(R.id.h2MediaCheck)
+        val testDcCheck = view.findViewById<CheckBox>(R.id.forceTestDcCheck)
         val frontingInput = view.findViewById<EditText>(R.id.frontingSniInput)
         val toggleSecretButton = view.findViewById<Button>(R.id.toggleSecretButton)
 
@@ -350,6 +351,7 @@ class MainActivity : AppCompatActivity() {
         maxConnInput.setText(options.maxConnections.toString())
         poolCheck.isChecked = options.wsPoolEnabled
         h2MediaCheck.isChecked = options.cfH2MediaEnabled
+        testDcCheck.isChecked = options.forceTestDc
         frontingInput.setText(options.frontingSni)
 
         view.findViewById<Button>(R.id.generateSecretButton).setOnClickListener {
@@ -444,6 +446,7 @@ class MainActivity : AppCompatActivity() {
                     fakeTlsDomain = masking,
                     wsPoolEnabled = poolCheck.isChecked,
                     cfH2MediaEnabled = h2MediaCheck.isChecked,
+                    forceTestDc = testDcCheck.isChecked,
                     frontingSni = frontingSni
                 )
                 // Changing any of these rewrites the tg://proxy link, which makes the

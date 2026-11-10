@@ -294,7 +294,7 @@ class TelegramProxy(
 
                     bridgeRoutes(
                         client, dcId, parsed.isMedia, streams.input, streams.output,
-                        relayInit, crypto, splitter, parsed.protocolInt
+                        relayInit, crypto, splitter, parsed.protocolInt, parsed.isTestDc
                     )
                 }
             }
@@ -317,10 +317,13 @@ class TelegramProxy(
         relayInit: ByteArray,
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?,
-        protocol: Int
+        protocol: Int,
+        isTestDc: Boolean
     ) {
         val wsTarget = wsConnectHost(dcId, options.dcIpMap)
-        val methods = routePlanner.methodsFor(dcId, isMedia, networkOptions, wsTarget)
+        val methods = routePlanner.methodsFor(
+            dcId, isMedia, networkOptions, wsTarget, isTestDc
+        )
         for (method in methods) {
             routePlanner.markTrying(method, dcId, isMedia)
             lastMessage = routePlanner.status()
@@ -335,7 +338,8 @@ class TelegramProxy(
                         clientIn,
                         clientOut,
                         relayInit,
-                        crypto
+                        crypto,
+                        isTestDc
                     )
                     RouteMethod.WEBSOCKET -> bridgeWebSocket(
                         client,
@@ -345,7 +349,8 @@ class TelegramProxy(
                         clientOut,
                         relayInit,
                         crypto,
-                        splitter
+                        splitter,
+                        isTestDc
                     )
                     RouteMethod.FRONTING -> bridgeFronting(
                         client,
@@ -355,7 +360,8 @@ class TelegramProxy(
                         clientOut,
                         relayInit,
                         crypto,
-                        splitter
+                        splitter,
+                        isTestDc
                     )
                     RouteMethod.HTTP2 -> bridgeHttp2(
                         client, dcId, isMedia, clientIn, clientOut, crypto, protocol
@@ -370,7 +376,7 @@ class TelegramProxy(
                         crypto,
                         splitter
                     )
-                    RouteMethod.TCP -> bridgeTcpFallback(client, dcId, isMedia, clientIn, clientOut, relayInit, crypto)
+                    RouteMethod.TCP -> bridgeTcpFallback(client, dcId, isMedia, clientIn, clientOut, relayInit, crypto, isTestDc)
                 }
             }.getOrElse { error ->
                 failureReason = ConnectionLog.failureReason(error)
@@ -396,12 +402,16 @@ class TelegramProxy(
         clientOut: OutputStream,
         relayInit: ByteArray,
         crypto: CryptoContext,
-        splitter: MtprotoPacketSplitter?
+        splitter: MtprotoPacketSplitter?,
+        isTestDc: Boolean
     ): Boolean {
         val host = wsConnectHost(dcId, options.dcIpMap) ?: return false
         val domains = wsDomains(dcId, isMedia)
 
-        if (networkOptions.wsPoolActive) {
+        // Upstream keeps a separate pool key and /apiws_test path for test DCs.
+        // On Android, avoid mixing test and production sockets: test DC uses
+        // fresh connections instead of warming an additional background pool.
+        if (!isTestDc && networkOptions.wsPoolActive) {
             val pooled = wsPool.get(WsPool.Key(dcId, isMedia), host, domains)
             if (pooled != null) {
                 val method = if (pooled.isFronted) RouteMethod.FRONTING else RouteMethod.WEBSOCKET
@@ -415,11 +425,12 @@ class TelegramProxy(
             }
         }
 
+        val wsPath = TelegramDcTarget(dcId, isTestDc).webSocketPath
         for ((attempt, domain) in domains.withIndex()) {
             val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WEBSOCKET, dcId, isMedia, attempt)
             val connectStart = System.currentTimeMillis()
             val ws = try {
-                RawWebSocket.connect(host, domain, connectTimeout)
+                RawWebSocket.connect(host, domain, connectTimeout, path = wsPath)
             } catch (redirect: WebSocketHandshakeException) {
                 if (!redirect.isRedirect) {
                     lastMessage = "WebSocket DC$dcId недоступен: ${redirect.statusLine}"
@@ -458,7 +469,8 @@ class TelegramProxy(
         clientOut: OutputStream,
         relayInit: ByteArray,
         crypto: CryptoContext,
-        splitter: MtprotoPacketSplitter?
+        splitter: MtprotoPacketSplitter?,
+        isTestDc: Boolean
     ): Boolean {
         val host = wsConnectHost(dcId, options.dcIpMap) ?: return false
         val sni = options.frontingSni.trim().ifEmpty { return false }
@@ -466,7 +478,10 @@ class TelegramProxy(
         val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.FRONTING, dcId, isMedia)
         val connectStart = System.currentTimeMillis()
         val ws = try {
-            RawWebSocket.connect(host, domain, connectTimeout, sni = sni)
+            RawWebSocket.connect(
+                host, domain, connectTimeout,
+                path = TelegramDcTarget(dcId, isTestDc).webSocketPath, sni = sni
+            )
         } catch (ignored: Exception) {
             return false
         }
@@ -676,11 +691,13 @@ class TelegramProxy(
         clientIn: InputStream,
         clientOut: OutputStream,
         relayInit: ByteArray,
-        crypto: CryptoContext
+        crypto: CryptoContext,
+        isTestDc: Boolean
     ): Boolean {
-        val dst = directIp(dcId) ?: return false
+        val dst = directIp(dcId, isTestDc) ?: return false
         val workerDomains = options.cfWorkerDomains.take(MAX_CF_ATTEMPTS)
-        val pooled = workerPool.get(dcId, dst, workerDomains)
+        // The upstream Worker pool never returns a production socket for test DC.
+        val pooled = if (isTestDc) null else workerPool.get(dcId, dst, workerDomains)
         if (pooled != null) {
             workerConnections.incrementAndGet()
             routePlanner.markConnected(RouteMethod.WORKER, dcId, isMedia, 0)
@@ -733,9 +750,10 @@ class TelegramProxy(
         clientIn: InputStream,
         clientOut: OutputStream,
         relayInit: ByteArray,
-        crypto: CryptoContext
+        crypto: CryptoContext,
+        isTestDc: Boolean
     ): Boolean {
-        val targetIp = directIp(dcId) ?: run {
+        val targetIp = directIp(dcId, isTestDc) ?: run {
             lastMessage = "DC$dcId не найден в карте Telegram"
             return false
         }
@@ -897,7 +915,8 @@ class TelegramProxy(
     }
 
     /** Direct address for a DC, used by the TCP fallback and as the worker's `dst`. */
-    private fun directIp(dcId: Int): String? = options.dcIpMap[dcId] ?: defaultDcIps[dcId]
+    private fun directIp(dcId: Int, isTestDc: Boolean = false): String? =
+        TelegramDcTarget(dcId, isTestDc).directIp(options.dcIpMap)
 
     private fun tryHandshake(handshake: ByteArray): ParsedHandshake? {
         val clientDecPrekeyIv = handshake.copyOfRange(SKIP_LEN, SKIP_LEN + PREKEY_LEN + IV_LEN)
@@ -909,8 +928,10 @@ class TelegramProxy(
         val protocolInt = littleEndianInt(protocolTag)
         if (protocolInt !in supportedProtocolTags) return null
         val dcRaw = littleEndianShort(decrypted, DC_IDX_POS)
+        val destination = TelegramDcTarget.resolve(abs(dcRaw.toInt()), options.forceTestDc)
         return ParsedHandshake(
-            dcId = abs(dcRaw.toInt()),
+            dcId = destination.id,
+            isTestDc = destination.isTest,
             isMedia = dcRaw < 0,
             protocolTag = protocolTag,
             protocolInt = protocolInt,
@@ -982,6 +1003,7 @@ class TelegramProxy(
 
     private data class ParsedHandshake(
         val dcId: Int,
+        val isTestDc: Boolean,
         val isMedia: Boolean,
         val protocolTag: ByteArray,
         val protocolInt: Int,
@@ -1029,14 +1051,8 @@ class TelegramProxy(
         )
         private const val MAX_CF_ATTEMPTS = 3
         private const val RECENT_EVENTS_LIMIT = 8
-        private val defaultDcIps = mapOf(
-            1 to "149.154.175.50",
-            2 to "149.154.167.51",
-            3 to "149.154.175.100",
-            4 to "149.154.167.91",
-            5 to "149.154.171.5",
-            203 to "91.105.192.100"
-        )
+        // Production and test endpoint maps live in TelegramDcTarget, so
+        // direct TCP and Cloudflare Worker cannot accidentally disagree.
 
 
         private const val DEFAULT_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000
