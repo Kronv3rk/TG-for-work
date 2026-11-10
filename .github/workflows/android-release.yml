@@ -187,7 +187,7 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/new-signing.txt"
 
           mkdir -p "$RUNNER_TEMP/previous"
-          gh release download v1.10.1 --pattern '*-release-signed.apk' --dir "$RUNNER_TEMP/previous"
+          gh release download v1.11.1 --pattern '*-release-signed.apk' --dir "$RUNNER_TEMP/previous"
           PREVIOUS="$(find "$RUNNER_TEMP/previous" -maxdepth 1 -name '*.apk' | head -n 1)"
           if [[ -z "$PREVIOUS" || ! -f "$PREVIOUS" ]]; then
             echo "::error::Previous release APK is missing" >&2
@@ -197,11 +197,11 @@ jobs:
           NEW_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/new-signing.txt" | head -n 1)"
           OLD_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/old-signing.txt" | head -n 1)"
           if [[ -z "$NEW_CERT" || -z "$OLD_CERT" || "$NEW_CERT" != "$OLD_CERT" ]]; then
-            echo "::error::Release signing certificate does not match v1.10.1. Existing users cannot update." >&2
+            echo "::error::Release signing certificate does not match v1.11.1. Existing users cannot update." >&2
             exit 1
           fi
           (cd "$RUNNER_TEMP" && sha256sum "$(basename "$APK")") > "$APK.sha256"
-          echo "APK signature verified and compatible with v1.10.1"
+          echo "APK signature verified and compatible with v1.11.1"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -221,18 +221,12 @@ jobs:
           TAG="${{ steps.meta.outputs.tag }}"
           APK="${{ steps.build.outputs.asset_path }}"
           NOTES="$RUNNER_TEMP/release-notes.md"
-          cat > "$NOTES" <<'EOF'
-          TG-for-work 1.11.0
-
-          - Перенесена защита Fake TLS от повторных ClientHello и добавлен пул соединений собственного Cloudflare Worker.
-          - Добавлен экспериментальный Cloudflare HTTP/2 для медиатрафика: параллельные POST /api, TLS/ALPN и общий пул соединений.
-          - Добавлено ограниченное восстановление зависших MTProto-запросов, до трёх повторов и подавление поздних дублирующих ответов.
-          - Ограничены очереди и память HTTP/2-каналов; ошибки Cloudflare передаются в формате MTProto.
-          - HTTP/2 выключен по умолчанию и требует включённого Cloudflare. При неудачном preflight используются прежние маршруты.
-          - Сохранены прежние applicationId, формат tg://proxy, пользовательские настройки и сертификат подписи.
-
-          HTTP/2 проверен на локальном TLS/ALPN-сервере. Проверка на реальных Cloudflare /api и физических Android-устройствах остаётся отдельным этапом; прирост скорости не гарантируется.
-          EOF
+          SOURCE_NOTES="release-notes/$TAG.md"
+          if [[ ! -s "$SOURCE_NOTES" ]]; then
+            echo "::error::Dedicated release notes missing: $SOURCE_NOTES" >&2
+            exit 1
+          fi
+          cp "$SOURCE_NOTES" "$NOTES"
           gh release create "$TAG" "$APK" "$APK.sha256" \
             --title "TG-for-work $TAG" \
             --notes-file "$NOTES" \
