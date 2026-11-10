@@ -13,7 +13,7 @@ class HostValidationTest(unittest.TestCase):
     def test_rejects_credentials_urls_private_endpoints_and_ip_literals(self):
         invalid = [
             "https://proxy.example.org", "user:password@proxy.domain.org",
-            "127.0.0.1", "[::1]", "localhost", "kws2.local",
+            "127.0.0.1", "0177.0.0.1", "kws.123", "[::1]", "localhost", "kws2.local",
             " kws2.proxy.org ",
             "kws2.internal", "-bad.proxy.org", "bad-.proxy.org",
             "proxy.domain.org:8443", "proxy.domain.org/api", "proxy.domain.org?x=1",
