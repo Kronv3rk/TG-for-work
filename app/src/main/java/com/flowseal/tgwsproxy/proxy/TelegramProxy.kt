@@ -281,6 +281,13 @@ class TelegramProxy(
                         badConnections.incrementAndGet()
                         lastMessage = "Telegram отклонил handshake: проверьте secret"
                         ConnectionLog.rejected("Handshake отклонён: проверьте secret в ссылке")
+                        // Match upstream's bounded bad-handshake drain. A socket
+                        // read timeout bounds silence; the 64 KiB budget bounds
+                        // peers that continue transmitting malformed packets.
+                        runCatching {
+                            client.soTimeout = BAD_HANDSHAKE_DRAIN_TIMEOUT_MS
+                            BadHandshakeDrainer.drain(streams.input)
+                        }
                         return
                     }
 
@@ -1056,6 +1063,7 @@ class TelegramProxy(
 
 
         private const val DEFAULT_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000
+        private const val BAD_HANDSHAKE_DRAIN_TIMEOUT_MS = 10_000
 
         private fun namedDaemonThreads(prefix: String): ThreadFactory {
             val threadNumber = AtomicInteger(1)
