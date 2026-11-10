@@ -3,7 +3,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from android_field_sample import parse_battery, parse_pss_kb
+from android_field_sample import parse_battery, parse_pss_kb, sample
+from unittest.mock import patch
+import subprocess
 
 
 class AndroidFieldParsingTest(unittest.TestCase):
@@ -20,6 +22,19 @@ class AndroidFieldParsingTest(unittest.TestCase):
         self.assertIsNone(parse_pss_kb("No process found"))
         self.assertEqual({"level_percent": None, "temperature_tenths_c": None},
                          parse_battery("Battery state unknown"))
+
+
+    def test_stopped_app_is_recorded_without_aborting_the_sample(self):
+        results = [
+            subprocess.CompletedProcess([], 1, stdout="", stderr=""),  # pidof
+            subprocess.CompletedProcess([], 0, stdout="  level: 44\n", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout="No process found", stderr=""),
+        ]
+        with patch("android_field_sample.subprocess.run", side_effect=results):
+            row = sample(None, "com.flowseal.tgwsproxy")
+        self.assertEqual(0, row["app_running"])
+        self.assertIsNone(row["pss_kb"])
+        self.assertEqual(44, row["level_percent"])
 
 
 if __name__ == "__main__":
