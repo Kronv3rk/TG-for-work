@@ -200,7 +200,7 @@ internal class CfH2Transport(
         @Throws(IOException::class)
         fun send(body: ByteArray) {
             if (closed.get()) throw IOException("H2 channel already closed")
-            if (body.isEmpty() || body.size > H2MediaPolicy.MAX_REPLY_BYTES) {
+            if (body.size < 24 || body.size > H2MediaPolicy.MAX_REPLY_BYTES || body.size % 4 != 0) {
                 throw IOException("Invalid H2 upload packet")
             }
             val entry = replayWindow.remember(body)
@@ -223,7 +223,7 @@ internal class CfH2Transport(
                 if (waitForCapacity) throw IOException("H2 channel already closed")
                 return false
             }
-            if (body.isEmpty() || body.size > H2MediaPolicy.MAX_REPLY_BYTES) {
+            if (body.size < 24 || body.size > H2MediaPolicy.MAX_REPLY_BYTES || body.size % 4 != 0) {
                 releaseTicket(ticket, replay)
                 throw IOException("Invalid H2 upload packet")
             }
