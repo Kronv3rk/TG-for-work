@@ -327,12 +327,17 @@ internal class CfH2Transport(
         @Throws(IOException::class)
         fun receive(): ByteArray? {
             while (true) {
+                // An already-accepted MTProto packet belongs to the client even
+                // when another concurrent H2 stream has failed. Drain it before
+                // the native error or IOException (as upstream cf_h2 does).
+                dequeueReply(queuedReplies.poll())?.let { return it }
                 val nativeError = transportError.get()
                 if (nativeError != 0 && transportErrorDelivered.compareAndSet(false, true)) {
                     return ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
                         .putInt(nativeError).array()
                 }
                 failure.get()?.let { throw it }
+                if (closed.get()) return null
 
                 val reply = try {
                     queuedReplies.poll(REPLAY_CHECK_MS, TimeUnit.MILLISECONDS)
@@ -340,25 +345,24 @@ internal class CfH2Transport(
                     Thread.currentThread().interrupt()
                     throw IOException("H2 response read interrupted", error)
                 }
-                if (reply != null) {
-                    queuedBytes.addAndGet(-reply.body.size)
-                    lane.releaseReply(reply.reservedBytes)
-                    return reply.body
-                }
-                if (closed.get()) {
-                    if (transportError.get() != 0 && !transportErrorDelivered.get()) continue
-                    failure.get()?.let { throw it }
-                    return null
-                }
+                dequeueReply(reply)?.let { return it }
+                if (closed.get()) continue
                 if (pending.get() > 0 &&
                     System.currentTimeMillis() - lastProgress.get() >= REQUEST_TIMEOUT_SECONDS * 1_000L
                 ) {
                     val error = SocketTimeoutException("H2 media response stalled")
                     fail(error)
-                    failure.get()?.let { throw it }
+                    continue
                 }
                 dispatchReplayIfDue()
             }
+        }
+
+        private fun dequeueReply(reply: QueuedReply?): ByteArray? {
+            if (reply == null) return null
+            queuedBytes.addAndGet(-reply.body.size)
+            lane.releaseReply(reply.reservedBytes)
+            return reply.body
         }
 
         private fun dispatchReplayIfDue() {
@@ -524,20 +528,24 @@ internal class CfH2Transport(
                     failedUntil[host] = System.currentTimeMillis() + DOMAIN_COOLDOWN_MS
                 }
             }
-            close()
+            closeInternal(preserveBufferedReplies = true)
         }
 
-        override fun close() {
+        override fun close() = closeInternal(preserveBufferedReplies = false)
+
+        private fun closeInternal(preserveBufferedReplies: Boolean) {
             if (!closed.compareAndSet(false, true)) return
             for ((call, _) in pendingCalls.toMap()) {
                 call.cancel()
                 complete(call)
             }
             synchronized(replyLock) {
-                while (true) {
-                    val reply = queuedReplies.poll() ?: break
-                    queuedBytes.addAndGet(-reply.body.size)
-                    lane.releaseReply(reply.reservedBytes)
+                if (!preserveBufferedReplies) {
+                    while (true) {
+                        val reply = queuedReplies.poll() ?: break
+                        queuedBytes.addAndGet(-reply.body.size)
+                        lane.releaseReply(reply.reservedBytes)
+                    }
                 }
             }
             replayWindow.clear()
