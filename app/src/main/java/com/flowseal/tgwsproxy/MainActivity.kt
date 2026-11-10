@@ -338,6 +338,7 @@ class MainActivity : AppCompatActivity() {
         val h2MediaCheck = view.findViewById<CheckBox>(R.id.h2MediaCheck)
         val testDcCheck = view.findViewById<CheckBox>(R.id.forceTestDcCheck)
         val proxyProtocolCheck = view.findViewById<CheckBox>(R.id.proxyProtocolCheck)
+        val cfPlaintextCheck = view.findViewById<CheckBox>(R.id.cfPlaintextCheck)
         val frontingInput = view.findViewById<EditText>(R.id.frontingSniInput)
         val toggleSecretButton = view.findViewById<Button>(R.id.toggleSecretButton)
 
@@ -354,6 +355,7 @@ class MainActivity : AppCompatActivity() {
         h2MediaCheck.isChecked = options.cfH2MediaEnabled
         testDcCheck.isChecked = options.forceTestDc
         proxyProtocolCheck.isChecked = options.proxyProtocolEnabled
+        cfPlaintextCheck.isChecked = options.cfPlaintextEnabled
         frontingInput.setText(options.frontingSni)
 
         view.findViewById<Button>(R.id.generateSecretButton).setOnClickListener {
@@ -450,6 +452,7 @@ class MainActivity : AppCompatActivity() {
                     cfH2MediaEnabled = h2MediaCheck.isChecked,
                     forceTestDc = testDcCheck.isChecked,
                     proxyProtocolEnabled = proxyProtocolCheck.isChecked,
+                    cfPlaintextEnabled = cfPlaintextCheck.isChecked,
                     frontingSni = frontingSni
                 )
                 // Changing any of these rewrites the tg://proxy link, which makes the
