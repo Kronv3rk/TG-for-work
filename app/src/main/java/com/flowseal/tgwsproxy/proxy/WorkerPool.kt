@@ -34,8 +34,16 @@ internal class WorkerPool<T : Closeable>(
 
     fun get(dcId: Int, destination: String, domains: List<String>): T? {
         require(dcId > 0 && destination.isNotBlank() && '|' !in destination)
-        if (domains.isEmpty()) return null
-        return delegate.get(WsPool.Key(dcId, false), "$dcId|$destination", domains)
+        // Upstream available_domains() removes duplicates before trying
+        // candidates. Keep the canonical order stable across calls: WsPool
+        // keys are sensitive to domain lists, and shuffling here would drop
+        // healthy pre-opened sockets every time a Telegram session starts.
+        val uniqueDomains = domains.asSequence()
+            .filter { it.isNotBlank() }
+            .distinct()
+            .toList()
+        if (uniqueDomains.isEmpty()) return null
+        return delegate.get(WsPool.Key(dcId, false), "$dcId|$destination", uniqueDomains)
     }
 
     fun clear() = delegate.clear()
