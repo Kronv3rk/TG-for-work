@@ -26,6 +26,7 @@ class CloudflareH2PreflightTest {
             "https://kws2.proxy.domain.org", "kws2.proxy.domain.org/api",
             "user:password@kws2.proxy.domain.org", "127.0.0.1",
             "localhost", "kws2.internal", "kws2.local", "kws2..proxy.org",
+            "0177.0.0.1", "kws.123",
             "kws2.proxy.org:8443", "-bad.proxy.org"
         )) {
             assertFalse("Invalid external H2 host: $host", validPublicHost(host))
@@ -79,7 +80,8 @@ class CloudflareH2PreflightTest {
         if (value.contains(Regex("[\\s/@:#?\\\\]"))) return false
         val host = value.lowercase()
         val parts = host.split('.')
-        if (parts.size < 2 || parts.last() in setOf(
+        if (parts.size < 2 || parts.last().none { it in 'a'..'z' } ||
+            parts.last() in setOf(
                 "localhost", "local", "internal", "invalid", "example", "test"
             )
         ) return false
