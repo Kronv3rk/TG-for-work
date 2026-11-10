@@ -67,6 +67,11 @@ class TelegramProxy(
 
     /** Pool refills dial on their own threads so they never take a client's slot in [executor]. */
     private val poolExecutor = Executors.newCachedThreadPool(namedDaemonThreads("tg-ws-pool"))
+    // A single daemon watchdog guarantees the absolute deadline even when
+    // FakeTlsInputStream performs several socket reads inside one read() call.
+    private val handshakeWatchdog = Executors.newSingleThreadScheduledExecutor(
+        namedDaemonThreads("tg-handshake-watchdog")
+    )
     private val frontingDialer = FrontingDialer(
         normal = { host: String, domain: String ->
             RawWebSocket.connect(host, domain, WsPool.CONNECT_TIMEOUT_MS)
@@ -261,6 +266,7 @@ class TelegramProxy(
         workerPool.close()
         h2Transport?.close()
         poolExecutor.shutdownNow()
+        handshakeWatchdog.shutdownNow()
         executor.shutdownNow()
     }
 
@@ -291,11 +297,22 @@ class TelegramProxy(
                         // The absolute deadline also bounds peers dripping bytes
                         // just before each per-read timeout expires.
                         runCatching {
-                            BadHandshakeDrainer.drain(
-                                streams.input,
-                                timeoutMillis = BAD_HANDSHAKE_DRAIN_TIMEOUT_MS.toLong(),
-                                setReadTimeoutMillis = { remaining -> client.soTimeout = remaining }
+                            // The outer timer also interrupts nested TLS reads
+                            // that could otherwise extend a single InputStream.read().
+                            val watchdog = handshakeWatchdog.schedule(
+                                { runCatching { client.close() } },
+                                BAD_HANDSHAKE_DRAIN_TIMEOUT_MS.toLong(),
+                                TimeUnit.MILLISECONDS
                             )
+                            try {
+                                BadHandshakeDrainer.drain(
+                                    streams.input,
+                                    timeoutMillis = BAD_HANDSHAKE_DRAIN_TIMEOUT_MS.toLong(),
+                                    setReadTimeoutMillis = { remaining -> client.soTimeout = remaining }
+                                )
+                            } finally {
+                                watchdog.cancel(false)
+                            }
                         }
                         return
                     }
