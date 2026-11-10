@@ -29,6 +29,13 @@ class ProxyOptionsTest {
     }
 
     @Test
+    fun trustedReverseProxyHeaderIsExplicitOptInAndRestartsTheListener() {
+        val normal = ProxyOptions(secretHex = "abc")
+        assertFalse(normal.proxyProtocolEnabled)
+        assertFalse(normal.sameConnection(normal.copy(proxyProtocolEnabled = true)))
+    }
+
+    @Test
     fun networkTypeIsNotPartOfTheConnectionIdentity() {
         // Switching Wi-Fi <-> mobile must not look like a different proxy, or the
         // running proxy would be torn down and every Telegram connection dropped.
