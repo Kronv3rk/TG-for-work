@@ -58,7 +58,7 @@ jobs:
     name: Explicit real-host TLS/ALPN preflight (no MTProto)
     runs-on: ubuntu-latest
     needs: local-protocol
-    if: ${{ inputs.h2_host != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.h2_host != '' }}
     timeout-minutes: 20
     env:
       TG_H2_PROBE_HOST: ${{ inputs.h2_host }}
