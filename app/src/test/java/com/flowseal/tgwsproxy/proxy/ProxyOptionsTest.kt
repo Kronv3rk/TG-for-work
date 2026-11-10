@@ -58,6 +58,18 @@ class ProxyOptionsTest {
     }
 
     @Test
+    fun cfWorkerDomainsDeduplicateBeforeDirectAndPooledFallbacks() {
+        val options = ProxyOptions(
+            secretHex = "abc",
+            cfWorkerDomain = "primary.example primary.example, backup.example backup.example"
+        )
+        assertEquals(
+            listOf("primary.example", "backup.example"),
+            options.cfWorkerDomains
+        )
+    }
+
+    @Test
     fun dcIpOverridesParsedFromPairs() {
         val options = ProxyOptions(
             secretHex = "abc",
