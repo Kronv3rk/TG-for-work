@@ -531,7 +531,13 @@ internal class CfH2Transport(
             closeInternal(preserveBufferedReplies = true)
         }
 
-        override fun close() = closeInternal(preserveBufferedReplies = false)
+        override fun close() {
+            closeInternal(preserveBufferedReplies = false)
+            // A previous transport failure may already have closed the socket
+            // while keeping queued replies for delivery. Explicit client close
+            // must always release any remaining lane reply reservations.
+            discardBufferedReplies()
+        }
 
         private fun closeInternal(preserveBufferedReplies: Boolean) {
             if (!closed.compareAndSet(false, true)) return
@@ -539,18 +545,20 @@ internal class CfH2Transport(
                 call.cancel()
                 complete(call)
             }
-            synchronized(replyLock) {
-                if (!preserveBufferedReplies) {
-                    while (true) {
-                        val reply = queuedReplies.poll() ?: break
-                        queuedBytes.addAndGet(-reply.body.size)
-                        lane.releaseReply(reply.reservedBytes)
-                    }
-                }
-            }
+            if (!preserveBufferedReplies) discardBufferedReplies()
             replayWindow.clear()
             intentionallyCancelled.clear()
             channels.remove(this)
+        }
+
+        private fun discardBufferedReplies() {
+            synchronized(replyLock) {
+                while (true) {
+                    val reply = queuedReplies.poll() ?: break
+                    queuedBytes.addAndGet(-reply.body.size)
+                    lane.releaseReply(reply.reservedBytes)
+                }
+            }
         }
     }
 
