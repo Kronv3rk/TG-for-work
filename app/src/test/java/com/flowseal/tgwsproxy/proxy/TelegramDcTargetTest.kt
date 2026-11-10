@@ -44,4 +44,51 @@ class TelegramDcTargetTest {
         assertEquals("149.154.167.220", TelegramDcTarget(2, false).directIp(override))
         assertEquals("149.154.167.40", TelegramDcTarget(2, true).directIp(override))
     }
+    @Test
+    fun forcedTestModeDoesNotLeakProductionOverridesOrCloudflareRoutes() {
+        val options = ProxyOptions(
+            secretHex = "abc",
+            forceTestDc = true,
+            dcIpOverrides = "2:192.0.2.2",
+            cfProxyEnabled = true,
+            cfH2MediaEnabled = true,
+            cfWorkerDomain = "example.workers.dev"
+        )
+        val target = TelegramDcTarget.resolve(2, options.forceTestDc)
+        assertTrue(target.isTest)
+        assertEquals("/apiws_test", target.webSocketPath)
+        assertEquals("149.154.167.40", target.directIp(options.dcIpMap))
+        val methods = RoutePlanner().methodsFor(
+            target.id, true, options, isTestDc = target.isTest
+        )
+        assertFalse(methods.contains(RouteMethod.CLOUDFLARE))
+        assertFalse(methods.contains(RouteMethod.HTTP2))
+        assertTrue(methods.contains(RouteMethod.TCP))
+    }
+
+    @Test
+    fun disablingForcedTestModeRestoresProductionRoutesWithoutChangingSettings() {
+        val options = ProxyOptions(secretHex = "abc", cfProxyEnabled = true, cfH2MediaEnabled = true)
+        val production = TelegramDcTarget.resolve(2, options.forceTestDc)
+        val test = TelegramDcTarget.resolve(2, true)
+        assertFalse(production.isTest)
+        assertEquals("/apiws", production.webSocketPath)
+        assertEquals("149.154.167.51", production.directIp(emptyMap()))
+        assertTrue(test.isTest)
+        assertFalse(options.sameConnection(options.copy(forceTestDc = true)))
+        val methods = RoutePlanner().methodsFor(
+            production.id, true, options, isTestDc = production.isTest
+        )
+        assertTrue(methods.contains(RouteMethod.CLOUDFLARE))
+    }
+
+    @Test
+    fun taggedTestDcRemainsTestWhenForceSettingIsOff() {
+        val target = TelegramDcTarget.resolve(10_003, false)
+        assertEquals(3, target.id)
+        assertTrue(target.isTest)
+        assertEquals("/apiws_test", target.webSocketPath)
+        assertEquals("149.154.175.117", target.directIp(mapOf(3 to "192.0.2.3")))
+    }
+
 }
