@@ -30,6 +30,7 @@ object ProxyRuntime {
     private const val KEY_H2_MEDIA = "h2_media"
     private const val KEY_FORCE_TEST_DC = "force_test_dc"
     private const val KEY_PROXY_PROTOCOL = "proxy_protocol_v1"
+    private const val KEY_CF_PLAINTEXT = "cf_plaintext"
     private const val KEY_FRONTING_SNI = "fronting_sni"
 
     @Volatile
@@ -149,6 +150,7 @@ object ProxyRuntime {
             .putBoolean(KEY_H2_MEDIA, options.cfH2MediaEnabled)
             .putBoolean(KEY_FORCE_TEST_DC, options.forceTestDc)
             .putBoolean(KEY_PROXY_PROTOCOL, options.proxyProtocolEnabled)
+            .putBoolean(KEY_CF_PLAINTEXT, options.cfPlaintextEnabled)
             .putString(KEY_FRONTING_SNI, options.frontingSni.trim())
         val cleanSecret = options.secretHex.trim().lowercase()
         if (isValidSecret(cleanSecret)) {
@@ -228,6 +230,7 @@ object ProxyRuntime {
             cfH2MediaEnabled = prefs.getBoolean(KEY_H2_MEDIA, false),
             forceTestDc = prefs.getBoolean(KEY_FORCE_TEST_DC, false),
             proxyProtocolEnabled = prefs.getBoolean(KEY_PROXY_PROTOCOL, false),
+            cfPlaintextEnabled = prefs.getBoolean(KEY_CF_PLAINTEXT, false),
             frontingSni = prefs.getString(KEY_FRONTING_SNI, "").orEmpty(),
             cellularNetwork = isCellularNetwork(context)
         )
