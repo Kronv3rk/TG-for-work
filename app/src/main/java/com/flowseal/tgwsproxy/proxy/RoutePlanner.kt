@@ -34,15 +34,23 @@ class RoutePlanner {
      * timeout, and getting past exactly that is what fronting is for. It has its
      * own long cooldown if the address is truly unreachable.
      */
-    fun methodsFor(dcId: Int, isMedia: Boolean, options: ProxyOptions, wsTarget: String? = null): List<RouteMethod> {
+    fun methodsFor(
+        dcId: Int, isMedia: Boolean, options: ProxyOptions,
+        wsTarget: String? = null, isTestDc: Boolean = false
+    ): List<RouteMethod> {
         val now = System.currentTimeMillis()
         clearExpiredCooldowns(now)
 
         val base = baseOrder(isMedia, options).let { order ->
+            // Upstream never routes the test environment through the public
+            // Cloudflare proxy or H2 media: only Worker and direct TCP/WS.
+            val environmentRoutes = if (isTestDc) {
+                order.filterNot { it == RouteMethod.CLOUDFLARE || it == RouteMethod.HTTP2 }
+            } else order
             if (wsTarget != null && isTargetBlocked(wsTarget, now) && hasRelayFallback(options)) {
-                order.filterNot { it == RouteMethod.WEBSOCKET }
+                environmentRoutes.filterNot { it == RouteMethod.WEBSOCKET }
             } else {
-                order
+                environmentRoutes
             }
         }
         val available = base.filterNot { method ->
