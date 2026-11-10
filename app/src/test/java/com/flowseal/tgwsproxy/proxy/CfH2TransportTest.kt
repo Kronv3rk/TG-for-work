@@ -298,6 +298,58 @@ class CfH2TransportTest {
         }
     }
 
+    @Test(timeout = 10_000)
+    fun refusesShortOrMisalignedNativePacketsBeforePostingToCloudflare() {
+        createServer(http2 = true).use { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(200))
+            val transport = CfH2Transport(fixture.client)
+            try {
+                val channel = transport.open(listOf("localhost:${fixture.server.port}"))!!
+                for (size in listOf(1, 20, 23, 25, 26)) {
+                    try {
+                        channel.send(ByteArray(size).also { it[0] = 1 })
+                        org.junit.Assert.fail("Accepted invalid native MTProto size $size")
+                    } catch (_: java.io.IOException) {
+                        // Invalid MTProto must fail before sending any HTTP POST.
+                    }
+                }
+                assertEquals("HEAD preflight only", 1, fixture.server.requestCount)
+                channel.close()
+            } finally {
+                transport.close()
+            }
+        }
+    }
+
+    @Test(timeout = 10_000)
+    fun mapsRateLimitingToNativeErrorAndTemporarilyDemotesOrigin() {
+        createServer(http2 = true).use { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(200))
+            fixture.server.enqueue(MockResponse().setResponseCode(429))
+            val transport = CfH2Transport(fixture.client)
+            try {
+                val host = "localhost:${fixture.server.port}"
+                val channel = transport.open(listOf(host))!!
+                channel.send(ByteArray(24).also { it[0] = 1 })
+                val error = channel.receive()!!
+                assertArrayEquals(
+                    java.nio.ByteBuffer.allocate(4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                        .putInt(-429).array(),
+                    error
+                )
+                assertTrue(channel.failed)
+                channel.close()
+                // Do not retry a failing domain indefinitely within the cooldown.
+                // A new channel still requires a successful HEAD preflight.
+                transport.resetNetwork()
+                fixture.server.enqueue(MockResponse().setResponseCode(200))
+                assertNotNull(transport.open(listOf(host)))
+            } finally {
+                transport.close()
+            }
+        }
+    }
+
     @Test
     fun boundsAggregateReplyMemoryAcrossChannelsOnTheSameLane() {
         val lane = CfH2Transport.Lane()
