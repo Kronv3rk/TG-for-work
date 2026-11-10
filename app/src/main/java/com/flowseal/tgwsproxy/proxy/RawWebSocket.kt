@@ -23,7 +23,7 @@ class WebSocketHandshakeException(
 }
 
 class RawWebSocket private constructor(
-    private val socket: SSLSocket,
+    private val socket: Socket,
     private val input: BufferedInputStream,
     private val output: BufferedOutputStream,
     /** The TCP connection used fronting SNI rather than the relay hostname. */
@@ -188,7 +188,9 @@ class RawWebSocket private constructor(
         private val random = SecureRandom()
 
         /**
-         * Opens a WebSocket to [domain] (sent as the HTTP Host) over TLS to [targetIp].
+         * Opens a WebSocket to [domain] (sent as HTTP Host) over [targetIp].
+         * Only opt-in Cloudflare Proxy/Worker uses cleartext port 80; ordinary
+         * Telegram WebSockets and Domain Fronting always require TLS.
          *
          * [sni] overrides the TLS server name for domain fronting: the censor sees an
          * innocuous name while the relay still routes on the Host header. The
@@ -200,8 +202,12 @@ class RawWebSocket private constructor(
             domain: String,
             timeoutMs: Int = 10_000,
             path: String = "/apiws",
-            sni: String? = null
+            sni: String? = null,
+            secure: Boolean = true
         ): RawWebSocket {
+            require(CloudflareTransportMode.isValid(secure, sni)) {
+                "Domain fronting requires a TLS connection"
+            }
             val plain = Socket()
             var ssl: SSLSocket? = null
             try {
@@ -209,23 +215,25 @@ class RawWebSocket private constructor(
                 plain.keepAlive = true
                 plain.receiveBufferSize = BUFFER_SIZE
                 plain.sendBufferSize = BUFFER_SIZE
-                plain.connect(InetSocketAddress(targetIp, 443), timeoutMs)
+                val port = CloudflareTransportMode.port(secure)
+                plain.connect(InetSocketAddress(targetIp, port), timeoutMs)
                 plain.soTimeout = timeoutMs
 
-                val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
-                val serverName = sni ?: domain
-                val connectedSsl = sslFactory.createSocket(plain, serverName, 443, true) as SSLSocket
-                ssl = connectedSsl
-                // Fronting changes the HTTP Host, not the identity of the TLS peer.
-                // Check the certificate against the actual SNI on both routes.
-                connectedSsl.sslParameters = TlsEndpointPolicy.configure(
-                    connectedSsl.sslParameters, domain, sni
-                )
-                connectedSsl.startHandshake()
-                connectedSsl.soTimeout = timeoutMs
+                val transportSocket: Socket = if (secure) {
+                    val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
+                    val serverName = sni ?: domain
+                    val connectedSsl = sslFactory.createSocket(plain, serverName, port, true) as SSLSocket
+                    ssl = connectedSsl
+                    connectedSsl.sslParameters = TlsEndpointPolicy.configure(
+                        connectedSsl.sslParameters, domain, sni
+                    )
+                    connectedSsl.startHandshake()
+                    connectedSsl.soTimeout = timeoutMs
+                    connectedSsl
+                } else plain
 
-                val input = BufferedInputStream(connectedSsl.inputStream)
-                val output = BufferedOutputStream(connectedSsl.outputStream)
+                val input = BufferedInputStream(transportSocket.inputStream)
+                val output = BufferedOutputStream(transportSocket.outputStream)
                 val keyBytes = ByteArray(16).also(random::nextBytes)
                 val wsKey = Base64.encodeToString(keyBytes, Base64.NO_WRAP)
                 val request = buildString {
@@ -258,8 +266,8 @@ class RawWebSocket private constructor(
 
                 // Keep an idle read budget instead of blocking forever: receive()
                 // uses it to drive keepalive pings and to detect dead relays.
-                connectedSsl.soTimeout = IDLE_TIMEOUT_MS
-                return RawWebSocket(connectedSsl, input, output, isFronted = sni != null)
+                transportSocket.soTimeout = IDLE_TIMEOUT_MS
+                return RawWebSocket(transportSocket, input, output, isFronted = sni != null)
             } catch (error: Exception) {
                 runCatching { ssl?.close() }
                 runCatching { plain.close() }
