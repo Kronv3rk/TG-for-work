@@ -34,7 +34,7 @@ def parse_battery(output: str):
     return values
 
 
-def adb_call(serial, *args):
+def adb_call(serial, *args, allow_failure=False):
     cmd = ["adb"]
     if serial:
         cmd += ["-s", serial]
@@ -43,13 +43,13 @@ def adb_call(serial, *args):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=20, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(f"adb is unavailable or device command timed out: {exc}") from exc
-    if result.returncode:
+    if result.returncode and not allow_failure:
         raise RuntimeError(f"adb command failed (exit {result.returncode}); check device connection")
     return result.stdout
 
 
 def sample(serial, package):
-    pid = adb_call(serial, "pidof", "-s", package).strip()
+    pid = adb_call(serial, "pidof", "-s", package, allow_failure=True).strip()
     battery = parse_battery(adb_call(serial, "dumpsys", "battery"))
     # Only package-level aggregate PSS, never individual allocation contents.
     meminfo = adb_call(serial, "dumpsys", "meminfo", package)
