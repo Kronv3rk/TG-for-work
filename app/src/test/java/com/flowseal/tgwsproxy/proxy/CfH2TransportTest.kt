@@ -231,6 +231,73 @@ class CfH2TransportTest {
         }
     }
 
+    @Test(timeout = 15_000)
+    fun deliversBufferedNativePacketsBeforeReportingALaterHttpError() {
+        createServer(http2 = true).use { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(200))
+            val firstReply = ByteArray(24) { (it + 31).toByte() }
+            fixture.server.enqueue(
+                MockResponse().addHeader("Content-Type", "application/octet-stream")
+                    .setBody(Buffer().write(firstReply))
+            )
+            fixture.server.enqueue(MockResponse().setResponseCode(403))
+            val transport = CfH2Transport(fixture.client)
+            try {
+                val channel = transport.open(listOf("localhost:${fixture.server.port}"))!!
+                channel.send(ByteArray(24).also { it[0] = 1; it[8] = 1 })
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (channel.queuedReplyCount == 0 && System.nanoTime() < deadline) {
+                    Thread.sleep(25L)
+                }
+                assertEquals(1, channel.queuedReplyCount)
+                channel.send(ByteArray(24).also { it[0] = 1; it[8] = 2 })
+                while (!channel.failed && System.nanoTime() < deadline) {
+                    Thread.sleep(25L)
+                }
+                assertTrue("subsequent HTTP failure should close the channel", channel.failed)
+                assertArrayEquals("already-buffered MTProto reply must be drained first",
+                    firstReply, channel.receive())
+                val error = channel.receive()!!
+                assertArrayEquals(
+                    byteArrayOf(109, 0xfe.toByte(), 0xff.toByte(), 0xff.toByte()), error
+                )
+            } finally {
+                transport.close()
+            }
+        }
+    }
+
+    @Test(timeout = 15_000)
+    fun explicitCloseAfterTransportErrorReleasesBufferedResponses() {
+        createServer(http2 = true).use { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(200))
+            fixture.server.enqueue(MockResponse().addHeader(
+                "Content-Type", "application/octet-stream"
+            ).setBody(Buffer().write(ByteArray(24) { 11 })))
+            fixture.server.enqueue(MockResponse().setResponseCode(403))
+            val transport = CfH2Transport(fixture.client)
+            try {
+                val channel = transport.open(listOf("localhost:${fixture.server.port}"))!!
+                channel.send(ByteArray(24).also { it[0] = 1; it[8] = 1 })
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (channel.queuedReplyCount == 0 && System.nanoTime() < deadline) {
+                    Thread.sleep(25L)
+                }
+                assertEquals(1, channel.queuedReplyCount)
+                channel.send(ByteArray(24).also { it[0] = 1; it[8] = 2 })
+                while (!channel.failed && System.nanoTime() < deadline) {
+                    Thread.sleep(25L)
+                }
+                assertTrue(channel.failed)
+                assertEquals(1, channel.queuedReplyCount)
+                channel.close()
+                assertEquals(0, channel.queuedReplyCount)
+            } finally {
+                transport.close()
+            }
+        }
+    }
+
     @Test
     fun boundsAggregateReplyMemoryAcrossChannelsOnTheSameLane() {
         val lane = CfH2Transport.Lane()
