@@ -18,7 +18,9 @@ data class ProxyOptions(
     /** Experimental Cloudflare HTTP/2 media; disabled until device validation. */
     val cfH2MediaEnabled: Boolean = false,
     /** Force all DC 1–3 to Telegram's test environment for clients without +10000 tags. */
-    val forceTestDc: Boolean = false
+    val forceTestDc: Boolean = false,
+    /** Accept an unauthenticated PROXY v1 header only behind a trusted reverse proxy. */
+    val proxyProtocolEnabled: Boolean = false
 ) {
     val fakeTlsEnabled: Boolean
         get() = fakeTlsDomain.isNotBlank()
