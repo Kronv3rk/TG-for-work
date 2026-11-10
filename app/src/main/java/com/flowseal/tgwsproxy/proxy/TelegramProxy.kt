@@ -100,7 +100,8 @@ class TelegramProxy(
             val encodedIp = java.net.URLEncoder.encode(destination, "UTF-8")
             RawWebSocket.connect(
                 domain, domain, WsPool.CONNECT_TIMEOUT_MS,
-                path = "/apiws?dst=$encodedIp&dc=$dcId"
+                path = "/apiws?dst=$encodedIp&dc=$dcId",
+                secure = !options.cfPlaintextEnabled
             )
         },
         isOpen = RawWebSocket::isOpen,
@@ -679,7 +680,10 @@ class TelegramProxy(
             val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.CLOUDFLARE, dcId, isMedia, attempt)
             val connectStart = System.currentTimeMillis()
             val ws = try {
-                RawWebSocket.connect(domain, domain, connectTimeout)
+                RawWebSocket.connect(
+                    domain, domain, connectTimeout,
+                    secure = !options.cfPlaintextEnabled
+                )
             } catch (ignored: Exception) {
                 null
             } ?: continue
@@ -746,7 +750,10 @@ class TelegramProxy(
             val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WORKER, dcId, isMedia, attempt)
             val connectStart = System.currentTimeMillis()
             val ws = try {
-                RawWebSocket.connect(workerDomain, workerDomain, connectTimeout, path)
+                RawWebSocket.connect(
+                    workerDomain, workerDomain, connectTimeout, path,
+                    secure = !options.cfPlaintextEnabled
+                )
             } catch (ignored: Exception) {
                 null
             } ?: continue
