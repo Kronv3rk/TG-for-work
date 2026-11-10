@@ -14,10 +14,12 @@ class FakeTlsMaskingProfileProbeTest {
     }
 
     @Test
-    fun waitsForCompleteRecordBeforeSelectingProfile() {
+    fun readsApplicationRecordLengthFromItsHeaderAsUpstreamDoes() {
         val first = byteArrayOf(0x16, 0x03, 0x03, 0, 3, 1, 2, 3)
         val header = byteArrayOf(0x17, 0x03, 0x03, 0, 5)
-        assertNull(FakeTlsMaskingProfileProbe.firstApplicationDataLength(first + header))
+        // Upstream first_appdata_record_len() reads the size from the header.
+        // It must not wait for the encrypted payload on a short-lived probe.
+        assertEquals(5, FakeTlsMaskingProfileProbe.firstApplicationDataLength(first + header))
         assertEquals(5, FakeTlsMaskingProfileProbe.firstApplicationDataLength(first + header + ByteArray(5)))
         assertNull(FakeTlsMaskingProfileProbe.firstApplicationDataLength(first + byteArrayOf(0x17, 0x03)))
     }
