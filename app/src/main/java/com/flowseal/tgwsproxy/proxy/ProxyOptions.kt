@@ -16,7 +16,9 @@ data class ProxyOptions(
     val frontingSni: String = "",
     val cellularNetwork: Boolean = false,
     /** Experimental Cloudflare HTTP/2 media; disabled until device validation. */
-    val cfH2MediaEnabled: Boolean = false
+    val cfH2MediaEnabled: Boolean = false,
+    /** Force all DC 1–3 to Telegram's test environment for clients without +10000 tags. */
+    val forceTestDc: Boolean = false
 ) {
     val fakeTlsEnabled: Boolean
         get() = fakeTlsDomain.isNotBlank()
