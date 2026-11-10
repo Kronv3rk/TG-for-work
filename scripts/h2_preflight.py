@@ -31,7 +31,7 @@ def validated_public_host(raw: str) -> str:
     else:
         raise ValueError("IP literals are not permitted for the external probe")
     labels = host.split(".")
-    if len(labels) < 2 or labels[-1] in NON_PUBLIC_TLDS or not all(
+    if len(labels) < 2 or labels[-1] in NON_PUBLIC_TLDS or not re.search(r"[a-z]", labels[-1]) or not all(
         len(label) <= 63 and VALID_LABEL.fullmatch(label) for label in labels
     ):
         raise ValueError("Provide a syntactically valid public DNS hostname")
