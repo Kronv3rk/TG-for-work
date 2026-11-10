@@ -288,11 +288,14 @@ class TelegramProxy(
                         lastMessage = "Telegram отклонил handshake: проверьте secret"
                         ConnectionLog.rejected("Handshake отклонён: проверьте secret в ссылке")
                         // Match upstream's bounded bad-handshake drain. A socket
-                        // read timeout bounds silence; the 64 KiB budget bounds
-                        // peers that continue transmitting malformed packets.
+                        // The absolute deadline also bounds peers dripping bytes
+                        // just before each per-read timeout expires.
                         runCatching {
-                            client.soTimeout = BAD_HANDSHAKE_DRAIN_TIMEOUT_MS
-                            BadHandshakeDrainer.drain(streams.input)
+                            BadHandshakeDrainer.drain(
+                                streams.input,
+                                timeoutMillis = BAD_HANDSHAKE_DRAIN_TIMEOUT_MS.toLong(),
+                                setReadTimeoutMillis = { remaining -> client.soTimeout = remaining }
+                            )
                         }
                         return
                     }
