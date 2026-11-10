@@ -84,9 +84,12 @@ class FakeTls(
             zeroed[i] = 0
         }
         val expected = hmacSha256(secret, zeroed)
-        for (i in 0 until 28) {
-            if (expected[i] != clientRandom[i]) return null
-        }
+        // Match upstream hmac.compare_digest: do not leak the index of the
+        // first mismatched HMAC byte through early-return timing.
+        if (!java.security.MessageDigest.isEqual(
+                expected.copyOfRange(0, 28), clientRandom.copyOfRange(0, 28)
+            )
+        ) return null
         val timestampBytes = ByteArray(4) { i -> clientRandom[28 + i] xor expected[28 + i] }
         val timestamp = littleEndianInt(timestampBytes).toLong().and(0xFFFFFFFFL)
         val now = System.currentTimeMillis() / 1000L
