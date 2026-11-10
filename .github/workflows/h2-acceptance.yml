@@ -1,6 +1,17 @@
 name: HTTP/2 acceptance lab
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/h2-acceptance.yml"
+      - "app/src/main/java/com/flowseal/tgwsproxy/proxy/CfH2Transport.kt"
+      - "app/src/test/java/com/flowseal/tgwsproxy/proxy/CfH2TransportTest.kt"
+      - "app/src/test/java/com/flowseal/tgwsproxy/proxy/CloudflareH2PreflightTest.kt"
+      - "scripts/h2_preflight.py"
+      - "scripts/compare_h2_preflight.py"
+      - "scripts/android_field_sample.py"
+      - "scripts/tests/**"
   workflow_dispatch:
     inputs:
       h2_host:
