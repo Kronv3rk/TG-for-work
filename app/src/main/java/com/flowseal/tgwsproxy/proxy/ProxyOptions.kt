@@ -20,7 +20,9 @@ data class ProxyOptions(
     /** Force all DC 1–3 to Telegram's test environment for clients without +10000 tags. */
     val forceTestDc: Boolean = false,
     /** Accept an unauthenticated PROXY v1 header only behind a trusted reverse proxy. */
-    val proxyProtocolEnabled: Boolean = false
+    val proxyProtocolEnabled: Boolean = false,
+    /** Upstream --no-secure for CF Proxy/Worker only; never the default. */
+    val cfPlaintextEnabled: Boolean = false
 ) {
     val fakeTlsEnabled: Boolean
         get() = fakeTlsDomain.isNotBlank()
