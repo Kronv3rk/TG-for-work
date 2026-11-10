@@ -28,6 +28,7 @@ object ProxyRuntime {
     private const val KEY_MAX_CONNECTIONS = "max_connections"
     private const val KEY_WS_POOL = "ws_pool"
     private const val KEY_H2_MEDIA = "h2_media"
+    private const val KEY_FORCE_TEST_DC = "force_test_dc"
     private const val KEY_FRONTING_SNI = "fronting_sni"
 
     @Volatile
@@ -145,6 +146,7 @@ object ProxyRuntime {
             .putInt(KEY_MAX_CONNECTIONS, options.maxConnections)
             .putBoolean(KEY_WS_POOL, options.wsPoolEnabled)
             .putBoolean(KEY_H2_MEDIA, options.cfH2MediaEnabled)
+            .putBoolean(KEY_FORCE_TEST_DC, options.forceTestDc)
             .putString(KEY_FRONTING_SNI, options.frontingSni.trim())
         val cleanSecret = options.secretHex.trim().lowercase()
         if (isValidSecret(cleanSecret)) {
@@ -222,6 +224,7 @@ object ProxyRuntime {
                 .orEmpty(),
             wsPoolEnabled = prefs.getBoolean(KEY_WS_POOL, true),
             cfH2MediaEnabled = prefs.getBoolean(KEY_H2_MEDIA, false),
+            forceTestDc = prefs.getBoolean(KEY_FORCE_TEST_DC, false),
             frontingSni = prefs.getString(KEY_FRONTING_SNI, "").orEmpty(),
             cellularNetwork = isCellularNetwork(context)
         )
