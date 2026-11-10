@@ -268,6 +268,12 @@ class TelegramProxy(
         try {
             BufferedInputStream(client.getInputStream()).use { rawIn ->
                 BufferedOutputStream(client.getOutputStream()).use { rawOut ->
+                    if (options.proxyProtocolEnabled) {
+                        // An explicitly configured trusted NGINX/HAProxy sends a
+                        // PROXY v1 header before Fake TLS or MTProto starts.
+                        ProxyProtocolV1.read(rawIn)
+                        ConnectionLog.info("PROXY protocol: заголовок принят")
+                    }
                     val fakeTls = FakeTls(secretBytes, options.fakeTlsDomain, maskingProfileLength)
                     val streams = fakeTls.readClientStreams(rawIn, rawOut) ?: run {
                         maskedConnections.incrementAndGet()

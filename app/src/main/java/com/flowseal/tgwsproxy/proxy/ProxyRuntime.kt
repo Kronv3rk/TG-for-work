@@ -29,6 +29,7 @@ object ProxyRuntime {
     private const val KEY_WS_POOL = "ws_pool"
     private const val KEY_H2_MEDIA = "h2_media"
     private const val KEY_FORCE_TEST_DC = "force_test_dc"
+    private const val KEY_PROXY_PROTOCOL = "proxy_protocol_v1"
     private const val KEY_FRONTING_SNI = "fronting_sni"
 
     @Volatile
@@ -147,6 +148,7 @@ object ProxyRuntime {
             .putBoolean(KEY_WS_POOL, options.wsPoolEnabled)
             .putBoolean(KEY_H2_MEDIA, options.cfH2MediaEnabled)
             .putBoolean(KEY_FORCE_TEST_DC, options.forceTestDc)
+            .putBoolean(KEY_PROXY_PROTOCOL, options.proxyProtocolEnabled)
             .putString(KEY_FRONTING_SNI, options.frontingSni.trim())
         val cleanSecret = options.secretHex.trim().lowercase()
         if (isValidSecret(cleanSecret)) {
@@ -225,6 +227,7 @@ object ProxyRuntime {
             wsPoolEnabled = prefs.getBoolean(KEY_WS_POOL, true),
             cfH2MediaEnabled = prefs.getBoolean(KEY_H2_MEDIA, false),
             forceTestDc = prefs.getBoolean(KEY_FORCE_TEST_DC, false),
+            proxyProtocolEnabled = prefs.getBoolean(KEY_PROXY_PROTOCOL, false),
             frontingSni = prefs.getString(KEY_FRONTING_SNI, "").orEmpty(),
             cellularNetwork = isCellularNetwork(context)
         )

@@ -87,6 +87,23 @@
             android:textSize="15sp"
              />
 
+        <CheckBox
+            android:id="@+id/proxyProtocolCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:minHeight="52dp"
+            android:text="@string/settings_proxy_protocol_label"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings_proxy_protocol_hint"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
