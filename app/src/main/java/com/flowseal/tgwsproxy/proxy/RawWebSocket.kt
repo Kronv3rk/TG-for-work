@@ -9,8 +9,6 @@ import java.net.Socket
 import java.net.SocketTimeoutException
 import java.security.SecureRandom
 import java.security.MessageDigest
-import javax.net.ssl.SNIHostName
-import javax.net.ssl.SNIServerName
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import android.util.Base64
@@ -194,8 +192,8 @@ class RawWebSocket private constructor(
          *
          * [sni] overrides the TLS server name for domain fronting: the censor sees an
          * innocuous name while the relay still routes on the Host header. The
-         * certificate chain is validated by the platform trust store as usual; the
-         * raw SSLSocket never verifies the hostname, so no custom TrustManager is needed.
+         * certificate chain and SNI hostname are verified by the platform trust store.
+         * The HTTP Host remains the relay domain for fronting.
          */
         fun connect(
             targetIp: String,
@@ -218,12 +216,11 @@ class RawWebSocket private constructor(
                 val serverName = sni ?: domain
                 val connectedSsl = sslFactory.createSocket(plain, serverName, 443, true) as SSLSocket
                 ssl = connectedSsl
-                connectedSsl.sslParameters = connectedSsl.sslParameters.apply {
-                    serverNames = listOf<SNIServerName>(SNIHostName(serverName))
-                    // For normal TLS require the certificate to match the relay host.
-                    // Experimental fronting retains its separate, opt-in policy.
-                    if (sni == null) endpointIdentificationAlgorithm = "HTTPS"
-                }
+                // Fronting changes the HTTP Host, not the identity of the TLS peer.
+                // Check the certificate against the actual SNI on both routes.
+                connectedSsl.sslParameters = TlsEndpointPolicy.configure(
+                    connectedSsl.sslParameters, domain, sni
+                )
                 connectedSsl.startHandshake()
                 connectedSsl.soTimeout = timeoutMs
 
