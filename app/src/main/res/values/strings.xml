@@ -100,6 +100,8 @@
     <string name="settings_invalid_host">Некорректный локальный адрес</string>
     <string name="settings_invalid_port">Порт должен быть числом от 1 до 65535</string>
     <string name="settings_invalid_dcip">Некорректная пара DC:IP</string>
+    <string name="settings_cf_plaintext_label">Cloudflare без TLS (порт 80)</string>
+    <string name="settings_cf_plaintext_hint">Только для совместимости с оригиналом, если обычные защищённые соединения недоступны. Cloudflare Proxy и Worker будут передавать данные без TLS: посредники смогут наблюдать метаданные и изменять трафик. По умолчанию выключено. Прямой Telegram WebSocket и HTTP/2 останутся защищёнными.</string>
     <string name="settings_proxy_protocol_label">Принимать заголовок PROXY protocol v1</string>
     <string name="settings_proxy_protocol_hint">Только при работе за собственным NGINX или HAProxy, который добавляет такой заголовок. Для прямого подключения Telegram выключите: заголовок не защищён и не является частью MTProto.</string>
     <string name="settings_force_test_dc_label">Только тестовые дата-центры Telegram</string>
