@@ -14,7 +14,14 @@ def compare(left: dict, right: dict) -> dict:
         raise ValueError("Both preflights must target the exact same host")
     if left.get("probe") != "python-httpx-upstream-stack" or right.get("probe") != "android-okhttp-stack":
         raise ValueError("Unexpected preflight implementations")
-    ok = bool(left.get("accepted") and right.get("accepted"))
+    def verified(item, expected_version):
+        status = item.get("http_status")
+        return (item.get("accepted") is True and
+                item.get("http_version") == expected_version and
+                type(status) is int and
+                (200 <= status <= 299 or status in (405, 501)))
+
+    ok = verified(left, "HTTP/2") and verified(right, "h2")
     return {
         "host": left["host"],
         "scope": "tls_alpn_head_only",
