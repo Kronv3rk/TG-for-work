@@ -100,6 +100,8 @@
     <string name="settings_invalid_host">Некорректный локальный адрес</string>
     <string name="settings_invalid_port">Порт должен быть числом от 1 до 65535</string>
     <string name="settings_invalid_dcip">Некорректная пара DC:IP</string>
+    <string name="settings_force_test_dc_label">Только тестовые дата-центры Telegram</string>
+    <string name="settings_force_test_dc_hint">Для разработчиков: принудительно направляет подключения к тестовому окружению Telegram. Обычные аккаунты через этот прокси работать не будут. Если клиент передаёт номера дата-центров 10001–10003, переключатель не нужен.</string>
     <string name="settings_h2_media_label">Экспериментальный HTTP/2 для медиа через Cloudflare</string>
     <string name="settings_h2_media_hint">Требуется включённый Cloudflare. По умолчанию выключен. Передаёт медиапакеты параллельными запросами HTTP/2; если HTTP/2 не согласован, приложение использует прежние маршруты. Экспериментальный режим: совместимость с реальными Cloudflare-серверами и телефонами ещё проверяется.</string>
     <string name="settings_pool_label">Держать WebSocket-соединения наготове (только Wi-Fi)</string>
