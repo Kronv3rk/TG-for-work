@@ -501,8 +501,9 @@ class TelegramProxy(
             } catch (timeout: SocketTimeoutException) {
                 // Silence rather than a refusal is what address blocking looks like;
                 // the other domain goes to the same address, so do not wait twice.
-                routePlanner.markTargetTimedOut(host)
-                scheduleRelayProbe(host, domain, wsPath)
+                if (routePlanner.markTargetTimedOut(host)) {
+                    scheduleRelayProbe(host, domain, wsPath)
+                }
                 ConnectionLog.info("WS адрес $host не ответил вовремя; восстановление проверим в фоне")
                 return false
             } catch (ignored: Exception) {
