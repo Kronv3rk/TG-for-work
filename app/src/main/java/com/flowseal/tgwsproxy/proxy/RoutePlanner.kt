@@ -18,11 +18,12 @@ enum class RouteMethod(
     TCP("TCP", "TCP", 45_000L)
 }
 
-class RoutePlanner {
+class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) {
     private val cooldownUntil = ConcurrentHashMap<RouteKey, Long>()
     private val lastFailureAt = ConcurrentHashMap<RouteKey, Long>()
     private val health = ConcurrentHashMap<RouteKey, RouteHealth>()
     private val targetBlockedUntil = ConcurrentHashMap<String, Long>()
+    private val targetProbeDue = ConcurrentHashMap<String, Long>()
     private val lastStatus = AtomicReference("Маршрут ещё не выбран")
 
     /**
@@ -38,7 +39,7 @@ class RoutePlanner {
         dcId: Int, isMedia: Boolean, options: ProxyOptions,
         wsTarget: String? = null, isTestDc: Boolean = false
     ): List<RouteMethod> {
-        val now = System.currentTimeMillis()
+        val now = clockMs()
         clearExpiredCooldowns(now)
 
         val base = baseOrder(isMedia, options).let { order ->
@@ -96,15 +97,32 @@ class RoutePlanner {
      * The direct TCP route dials different addresses and is not affected.
      */
     fun markTargetTimedOut(target: String) {
-        targetBlockedUntil[target] = System.currentTimeMillis() + TARGET_TIMEOUT_COOLDOWN_MS
+        val due = clockMs() + TARGET_TIMEOUT_COOLDOWN_MS
+        targetBlockedUntil[target] = Long.MAX_VALUE
+        targetProbeDue[target] = due
     }
 
-    fun isTargetBlocked(target: String, now: Long = System.currentTimeMillis()): Boolean =
+    fun isTargetBlocked(target: String, now: Long = clockMs()): Boolean =
         (targetBlockedUntil[target] ?: 0L) > now
+
+    fun isBackgroundProbeDue(target: String): Boolean =
+        (targetProbeDue[target] ?: Long.MAX_VALUE) <= clockMs()
+
+    fun completeBackgroundProbe(target: String, reachable: Boolean) {
+        if (!targetProbeDue.containsKey(target)) return
+        if (reachable) {
+            targetProbeDue.remove(target)
+            targetBlockedUntil.remove(target)
+        } else {
+            targetProbeDue[target] = clockMs() + TARGET_TIMEOUT_COOLDOWN_MS
+            targetBlockedUntil[target] = Long.MAX_VALUE
+        }
+    }
 
     /** A different network may not block the same addresses, so start over. */
     fun resetTargetCooldowns() {
         targetBlockedUntil.clear()
+        targetProbeDue.clear()
     }
 
     /**
@@ -113,6 +131,7 @@ class RoutePlanner {
      */
     fun resetNetworkState() {
         targetBlockedUntil.clear()
+        targetProbeDue.clear()
         cooldownUntil.clear()
         lastFailureAt.clear()
         health.clear()
@@ -235,12 +254,7 @@ class RoutePlanner {
                 cooldownUntil.remove(entry.key, entry.value)
             }
         }
-        for (entry in targetBlockedUntil.entries) {
-            if (entry.value <= now) {
-                targetBlockedUntil.remove(entry.key, entry.value)
-            }
-        }
-        for (entry in lastFailureAt.entries) {
+                for (entry in lastFailureAt.entries) {
             if (now - entry.value > PROBATION_WINDOW_MS) {
                 lastFailureAt.remove(entry.key, entry.value)
             }
