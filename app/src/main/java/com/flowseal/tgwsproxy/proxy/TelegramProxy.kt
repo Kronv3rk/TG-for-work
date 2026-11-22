@@ -41,6 +41,7 @@ class TelegramProxy(
     private val sessionBudget = ProxySessionBudget(options.threadLimit)
     private val cfBalancer = CfProxyBalancer()
     private val routePlanner = RoutePlanner()
+    private val relayProbeGeneration = AtomicLong(0)
     private val h2Transport = if (options.cfH2MediaEnabled) CfH2Transport() else null
     private val clients = CopyOnWriteArraySet<Socket>()
     private val activeConnections = AtomicInteger(0)
@@ -69,6 +70,9 @@ class TelegramProxy(
     private val poolExecutor = Executors.newCachedThreadPool(namedDaemonThreads("tg-ws-pool"))
     // A single daemon watchdog guarantees the absolute deadline even when
     // FakeTlsInputStream performs several socket reads inside one read() call.
+    private val relayProbeExecutor = Executors.newSingleThreadScheduledExecutor(
+        namedDaemonThreads("tg-relay-probe")
+    )
     private val handshakeWatchdog = Executors.newSingleThreadScheduledExecutor(
         namedDaemonThreads("tg-handshake-watchdog")
     )
@@ -148,6 +152,7 @@ class TelegramProxy(
     fun onDefaultNetworkLost() = invalidateNetworkRoutes()
 
     private fun invalidateNetworkRoutes() {
+        relayProbeGeneration.incrementAndGet()
         routePlanner.resetNetworkState()
         frontingDialer.reset()
         wsPool.clear()
@@ -267,6 +272,8 @@ class TelegramProxy(
         workerPool.close()
         h2Transport?.close()
         poolExecutor.shutdownNow()
+        relayProbeGeneration.incrementAndGet()
+        relayProbeExecutor.shutdownNow()
         handshakeWatchdog.shutdownNow()
         executor.shutdownNow()
     }
@@ -339,6 +346,27 @@ class TelegramProxy(
             clients -= client
             runCatching { client.close() }
             lease.close()
+        }
+    }
+
+    /** A bounded, non-client probe; it never carries MTProto payloads. */
+    private fun scheduleRelayProbe(host: String, domain: String, path: String) {
+        val generation = relayProbeGeneration.get()
+        runCatching {
+            relayProbeExecutor.schedule({
+                if (generation != relayProbeGeneration.get() || !routePlanner.isBackgroundProbeDue(host)) {
+                    return@schedule
+                }
+                val reachable = runCatching {
+                    RawWebSocket.connect(host, domain, 3_000, path = path)?.let { socket ->
+                        socket.close()
+                        true
+                    } ?: false
+                }.getOrDefault(false)
+                if (generation != relayProbeGeneration.get()) return@schedule
+                routePlanner.completeBackgroundProbe(host, reachable)
+                if (!reachable) scheduleRelayProbe(host, domain, path)
+            }, 3_600_000L, java.util.concurrent.TimeUnit.MILLISECONDS)
         }
     }
 
@@ -473,8 +501,10 @@ class TelegramProxy(
             } catch (timeout: SocketTimeoutException) {
                 // Silence rather than a refusal is what address blocking looks like;
                 // the other domain goes to the same address, so do not wait twice.
-                routePlanner.markTargetTimedOut(host)
-                ConnectionLog.info("WS адрес $host не ответил вовремя, пропускаем его на час")
+                if (routePlanner.markTargetTimedOut(host)) {
+                    scheduleRelayProbe(host, domain, wsPath)
+                }
+                ConnectionLog.info("WS адрес $host не ответил вовремя; восстановление проверим в фоне")
                 return false
             } catch (ignored: Exception) {
                 null
