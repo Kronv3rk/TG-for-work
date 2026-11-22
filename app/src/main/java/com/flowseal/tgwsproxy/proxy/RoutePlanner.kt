@@ -96,10 +96,14 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
      * the address is skipped for [TARGET_TIMEOUT_COOLDOWN_MS] (upstream ip_fail_until).
      * The direct TCP route dials different addresses and is not affected.
      */
-    fun markTargetTimedOut(target: String) {
+    /** Returns true only when this timeout starts a new probe cycle. */
+    @Synchronized
+    fun markTargetTimedOut(target: String): Boolean {
+        if (targetProbeDue.containsKey(target)) return false
         val due = clockMs() + TARGET_TIMEOUT_COOLDOWN_MS
         targetBlockedUntil[target] = Long.MAX_VALUE
         targetProbeDue[target] = due
+        return true
     }
 
     fun isTargetBlocked(target: String, now: Long = clockMs()): Boolean =
@@ -108,6 +112,7 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
     fun isBackgroundProbeDue(target: String): Boolean =
         (targetProbeDue[target] ?: Long.MAX_VALUE) <= clockMs()
 
+    @Synchronized
     fun completeBackgroundProbe(target: String, reachable: Boolean) {
         if (!targetProbeDue.containsKey(target)) return
         if (reachable) {
