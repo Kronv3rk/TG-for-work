@@ -16,7 +16,8 @@ class RelayCooldownProbeTest {
 
     @Test
     fun expiredCooldownDoesNotMakeClientsProbeBlockedRelay() {
-        planner.markTargetTimedOut(relay)
+        assertTrue(planner.markTargetTimedOut(relay))
+        assertFalse(planner.markTargetTimedOut(relay))
         nowMs += 3_600_001L
         assertTrue(planner.isTargetBlocked(relay))
         assertTrue(planner.isBackgroundProbeDue(relay))
