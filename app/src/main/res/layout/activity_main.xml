@@ -12,9 +12,9 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingStart="20dp"
-        android:paddingTop="16dp"
+        android:paddingTop="28dp"
         android:paddingEnd="20dp"
-        android:paddingBottom="32dp">
+        android:paddingBottom="36dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -42,7 +42,7 @@
                     android:fontFamily="sans-serif-medium"
                     android:text="@string/home_title"
                     android:textColor="@color/text_primary"
-                    android:textSize="21sp" />
+                    android:textSize="30sp" />
 
                 <TextView
                     android:layout_width="match_parent"
@@ -57,7 +57,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="24dp"
             android:background="@drawable/bg_control_panel"
             android:orientation="vertical"
             android:padding="20dp">
@@ -98,7 +98,7 @@
                 android:fontFamily="sans-serif-medium"
                 android:text="@string/home_idle_title"
                 android:textColor="@color/text_primary"
-                android:textSize="26sp" />
+                android:textSize="24sp" />
 
             <TextView
                 android:id="@+id/heroBody"
@@ -240,6 +240,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="26dp"
             android:fontFamily="sans-serif-medium"
+            android:visibility="gone"
             android:text="@string/metrics_title"
             android:textColor="@color/text_primary"
             android:textSize="18sp" />
@@ -248,6 +249,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
+            android:visibility="gone"
             android:baselineAligned="false"
             android:orientation="horizontal">
 
@@ -312,6 +314,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
+            android:visibility="gone"
             android:background="@drawable/bg_panel_tint"
             android:orientation="vertical"
             android:padding="18dp">
@@ -509,6 +512,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:fontFamily="sans-serif-medium"
+                android:visibility="gone"
                 android:text="@string/footer_title"
                 android:textColor="@color/text_primary"
                 android:textSize="18sp" />
@@ -519,6 +523,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:lineSpacingExtra="2dp"
+                android:visibility="gone"
                 android:text="@string/footer_body"
                 android:textColor="@color/text_secondary"
                 android:textSize="14sp" />
@@ -528,6 +533,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
+                android:visibility="gone"
                 android:text="@string/route_health_empty"
                 android:textColor="@color/text_secondary"
                 android:textSize="13sp" />
@@ -617,6 +623,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="14dp"
                 android:gravity="center"
+                android:visibility="gone"
                 android:text="@string/build_info_placeholder"
                 android:textColor="@color/text_muted"
                 android:textSize="12sp" />
