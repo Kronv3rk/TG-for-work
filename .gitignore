@@ -32,3 +32,8 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Signing material and local audit captures
+/app/signing/
+*.p12
+/audit-captures/
