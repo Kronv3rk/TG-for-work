@@ -1,7 +1,5 @@
 package com.flowseal.tgwsproxy.proxy
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
@@ -11,6 +9,7 @@ import android.os.UserManager
 import android.util.Log
 import android.widget.Toast
 import com.flowseal.tgwsproxy.R
+import com.flowseal.tgwsproxy.SensitiveClipboard
 
 object ProxyRuntime {
     private const val LOG_TAG = "TgForWork"
@@ -31,10 +30,12 @@ object ProxyRuntime {
     private const val KEY_FORCE_TEST_DC = "force_test_dc"
     private const val KEY_PROXY_PROTOCOL = "proxy_protocol_v1"
     private const val KEY_CF_PLAINTEXT = "cf_plaintext"
+    private const val KEY_CF_AUTO_FALLBACK = "cf_auto_fallback"
     private const val KEY_FRONTING_SNI = "fronting_sni"
 
     @Volatile
     private var proxy: TelegramProxy? = null
+    private val secretStore = ProxySecretStore()
 
     @Synchronized
     fun start(context: Context): TelegramProxy {
@@ -118,7 +119,7 @@ object ProxyRuntime {
             .edit()
             .putString(KEY_FAKE_TLS_DOMAIN, value)
             .apply()
-        if (isRunning()) restart(context)
+
     }
 
     fun setCfProxyEnabled(context: Context, enabled: Boolean) {
@@ -126,18 +127,19 @@ object ProxyRuntime {
             .edit()
             .putBoolean(KEY_CF_ENABLED, enabled)
             .apply()
-        if (isRunning()) restart(context)
+
     }
 
     /**
-     * Persists every user-editable field of [options] and restarts the proxy if it
-     * is running, so new settings take effect immediately. Runtime-derived fields
+     * Persists every user-editable field of [options]. The service applies
+     * new settings through its command queue. Runtime-derived fields
      * (the network type) are not stored. A secret that is not 32 hex chars is
      * ignored and the existing one kept; callers validate before saving.
      */
     fun saveOptions(context: Context, options: ProxyOptions) {
         val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
+            .putBoolean(KEY_CF_ENABLED, options.cfProxyEnabled)
             .putString(KEY_CF_WORKER_DOMAIN, options.cfWorkerDomain.trim())
             .putString(KEY_CF_USER_DOMAIN, options.cfProxyUserDomain.trim())
             .putString(KEY_FAKE_TLS_DOMAIN, options.fakeTlsDomain.trim())
@@ -151,22 +153,22 @@ object ProxyRuntime {
             .putBoolean(KEY_FORCE_TEST_DC, options.forceTestDc)
             .putBoolean(KEY_PROXY_PROTOCOL, options.proxyProtocolEnabled)
             .putBoolean(KEY_CF_PLAINTEXT, options.cfPlaintextEnabled)
+            .putBoolean(KEY_CF_AUTO_FALLBACK, options.cfAutoFallbackEnabled && !options.cfPlaintextEnabled)
             .putString(KEY_FRONTING_SNI, options.frontingSni.trim())
         val cleanSecret = options.secretHex.trim().lowercase()
         if (isValidSecret(cleanSecret)) {
             editor.putString(KEY_SECRET, cleanSecret)
         }
         editor.apply()
-        if (isRunning()) restart(context)
+
     }
 
     fun isValidSecret(secret: String): Boolean =
-        secret.length == 32 && secret.all { it.isDigit() || it in 'a'..'f' }
+        secret.length == 32 && secret.all { it in '0'..'9' || it in 'a'..'f' }
 
     fun copyLink(context: Context) {
         val link = currentLink(context)
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("TG for Work proxy", link))
+        SensitiveClipboard.copy(context, "TG for Work proxy", link)
         Toast.makeText(context, R.string.proxy_link_copied, Toast.LENGTH_SHORT).show()
     }
 
@@ -194,13 +196,12 @@ object ProxyRuntime {
      * written with commit() so it is durable before it is used.
      */
     private fun resolveSecret(context: Context, prefs: android.content.SharedPreferences): String {
-        prefs.getString(KEY_SECRET, null)?.takeIf(::isValidSecret)?.let { return it }
-        check(isStorageUnlocked(context)) {
-            "Storage is locked; refusing to generate a new proxy secret"
-        }
-        val generated = TelegramProxy.generateSecret()
-        prefs.edit().putString(KEY_SECRET, generated).commit()
-        return generated
+        return secretStore.resolve(
+            read = { prefs.getString(KEY_SECRET, null) },
+            storageUnlocked = { isStorageUnlocked(context) },
+            generate = TelegramProxy::generateSecret,
+            persist = { prefs.edit().putString(KEY_SECRET, it).commit() }
+        )
     }
 
     private fun isStorageUnlocked(context: Context): Boolean {
@@ -231,6 +232,10 @@ object ProxyRuntime {
             forceTestDc = prefs.getBoolean(KEY_FORCE_TEST_DC, false),
             proxyProtocolEnabled = prefs.getBoolean(KEY_PROXY_PROTOCOL, false),
             cfPlaintextEnabled = prefs.getBoolean(KEY_CF_PLAINTEXT, false),
+            cfAutoFallbackEnabled = CloudflareTransportMode.autoFallbackEnabled(
+                if (prefs.contains(KEY_CF_AUTO_FALLBACK)) prefs.getBoolean(KEY_CF_AUTO_FALLBACK, false) else null,
+                prefs.getBoolean(KEY_CF_PLAINTEXT, false)
+            ),
             frontingSni = prefs.getString(KEY_FRONTING_SNI, "").orEmpty(),
             cellularNetwork = isCellularNetwork(context)
         )

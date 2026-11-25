@@ -12,6 +12,8 @@ import android.net.NetworkCapabilities
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.ResultReceiver
+import java.util.concurrent.Executors
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
@@ -22,6 +24,10 @@ import com.flowseal.tgwsproxy.proxy.ProxyRuntime
 
 class ProxyService : Service() {
     private val handler = Handler(Looper.getMainLooper())
+    private val commands = ProxyCommandQueue(runtimeExecutor) { handler.post(it) }
+    @Volatile private var destroyed = false
+    private var latestStartId = 0
+    private var latestAction = ACTION_START
     private val networkThread = HandlerThread("tg-proxy-network-events")
     private lateinit var networkHandler: Handler
     private val networkTracker = DefaultNetworkTracker()
@@ -45,61 +51,54 @@ class ProxyService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // An Android foreground-service start must either become foreground promptly
-        // or finish. Never keep an unstarted service alive while storage is locked.
-        if (intent?.action == ACTION_STOP) {
-            stopNetworkMonitoring()
-            ProxyRuntime.stop()
-            ProxyKeepAlive.release()
-            stopForegroundCompat()
-            stopSelf(startId)
-            return START_NOT_STICKY
+        val action = intent?.action ?: ACTION_START
+        latestStartId = startId
+        latestAction = action
+        @Suppress("DEPRECATION")
+        val receiver = intent?.getParcelableExtra<ResultReceiver>(EXTRA_RESULT)
+        val promotion = runCatching {
+            if (action != ACTION_STOP) startForegroundCompat()
         }
-        if (!canStartProxy()) {
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
-        return try {
-            // Promote before networking: binding a local port or loading a route
-            // can throw, and cannot be allowed to crash the main service thread.
-            startForegroundCompat()
-            when (intent?.action ?: ACTION_START) {
-                ACTION_OPEN_TELEGRAM -> {
-                    ProxyRuntime.start(this)
-                    ProxyRuntime.openTelegram(this)
+        commands.submit(
+            operation = {
+                check(!destroyed) { "Service destroyed" }
+                promotion.getOrThrow()
+                when (action) {
+                    ACTION_STOP -> ProxyRuntime.stop()
+                    ACTION_RESTART -> ProxyRuntime.restart(applicationContext)
+                    else -> ProxyRuntime.start(applicationContext)
                 }
-                ACTION_COPY_LINK -> {
-                    ProxyRuntime.start(this)
-                    ProxyRuntime.copyLink(this)
-                }
-                ACTION_RESTART -> ProxyRuntime.restart(this)
-                else -> ProxyRuntime.start(this)
-            }
-            START_STICKY
-        } catch (error: Exception) {
-            ConnectionLog.info("Не удалось запустить локальный прокси: ${error.javaClass.simpleName}")
-            stopNetworkMonitoring()
-            ProxyRuntime.stop()
-            ProxyKeepAlive.release()
-            runCatching { stopForegroundCompat() }
-            stopSelf(startId)
-            START_NOT_STICKY
-        }
-    }
+            },
+            cleanupOnFailure = { ProxyRuntime.stop() },
+            complete = { result ->
+                if (destroyed || latestStartId != startId) {
+                    receiver?.send(RESULT_SUPERSEDED, null)
+                } else if (result.isFailure || action == ACTION_STOP) {
+                    if (result.isFailure) {
+                        ConnectionLog.info("Proxy command failed: ${result.exceptionOrNull()?.javaClass?.simpleName}")
+                    }
+                    stopNetworkMonitoring()
+                    ProxyKeepAlive.release()
+                    runCatching { stopForegroundCompat() }
+                    stopSelfResult(startId)
+                    receiver?.send(if (result.isSuccess) RESULT_OK else RESULT_FAILED, null)
+                } else {
 
-    private fun canStartProxy(): Boolean {
-        val ok = runCatching { ProxyRuntime.loadOptions(applicationContext) }.isSuccess
-        if (!ok) {
-            ConnectionLog.info("Хранилище заблокировано, прокси стартует после разблокировки")
-        }
-        return ok
+                    handler.removeCallbacks(refreshNotification)
+                    handler.post(refreshNotification)
+                    receiver?.send(RESULT_OK, null)
+                }
+            }
+        )
+        return if (action == ACTION_STOP || promotion.isFailure) START_NOT_STICKY else START_STICKY
     }
 
     override fun onDestroy() {
+        destroyed = true
         handler.removeCallbacks(refreshNotification)
         stopNetworkMonitoring()
         networkThread.quitSafely()
-        ProxyRuntime.stop()
+        runtimeExecutor.execute { ProxyRuntime.stop() }
         ProxyKeepAlive.release()
         super.onDestroy()
     }
@@ -111,7 +110,7 @@ class ProxyService : Service() {
      * aggressive vendor ROMs (MIUI and friends) that kill it anyway.
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (ProxyRuntime.isRunning()) {
+        if (latestAction != ACTION_STOP && ProxyRuntime.isRunning()) {
             runCatching { start(applicationContext) }
         }
         super.onTaskRemoved(rootIntent)
@@ -213,12 +212,7 @@ class ProxyService : Service() {
 
     private fun stopForegroundCompat() {
         handler.removeCallbacks(refreshNotification)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     private fun buildNotification(): Notification {
@@ -243,14 +237,19 @@ class ProxyService : Service() {
             .setContentIntent(openAppIntent)
             .setOngoing(true)
             .setShowWhen(false)
-            .addAction(R.drawable.ic_power, getString(R.string.notification_open), serviceIntent(ACTION_OPEN_TELEGRAM, 11))
-            .addAction(R.drawable.ic_list, getString(R.string.notification_copy), serviceIntent(ACTION_COPY_LINK, 12))
+            .addAction(R.drawable.ic_power, getString(R.string.notification_open), activityIntent(ACTION_OPEN_TELEGRAM, 11))
+            .addAction(R.drawable.ic_list, getString(R.string.notification_copy), activityIntent(ACTION_COPY_LINK, 12))
             .addAction(R.drawable.ic_check, getString(R.string.notification_stop), serviceIntent(ACTION_STOP, 13))
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            builder.setCategory(Notification.CATEGORY_SERVICE)
-        }
+        builder.setCategory(Notification.CATEGORY_SERVICE)
         return builder.build()
+    }
+
+    private fun activityIntent(action: String, requestCode: Int): PendingIntent {
+        val intent = Intent(this, NotificationActionActivity::class.java)
+            .setAction(action)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return PendingIntent.getActivity(this, requestCode, intent, pendingFlags())
     }
 
     private fun serviceIntent(action: String, requestCode: Int): PendingIntent {
@@ -259,11 +258,7 @@ class ProxyService : Service() {
     }
 
     private fun pendingFlags(): Int {
-        var flags = PendingIntent.FLAG_UPDATE_CURRENT
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            flags = flags or PendingIntent.FLAG_IMMUTABLE
-        }
-        return flags
+        return PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     }
 
     private fun createNotificationChannel() {
@@ -278,6 +273,11 @@ class ProxyService : Service() {
     }
 
     companion object {
+        private val runtimeExecutor = Executors.newSingleThreadExecutor()
+        private const val EXTRA_RESULT = "proxy_command_result"
+        const val RESULT_OK = 1
+        const val RESULT_FAILED = 0
+        const val RESULT_SUPERSEDED = 2
         private const val CHANNEL_ID = "tg_for_work_proxy"
         private const val NOTIFICATION_ID = 1001
         private const val NOTIFICATION_REFRESH_MS = 3_000L
@@ -291,9 +291,10 @@ class ProxyService : Service() {
             send(context, ACTION_START)
         }
 
-        fun send(context: Context, action: String) {
+        fun send(context: Context, action: String, receiver: ResultReceiver? = null) {
             val intent = Intent(context, ProxyService::class.java).setAction(action)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (receiver != null) intent.putExtra(EXTRA_RESULT, receiver)
+            if (action != ACTION_STOP && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)

@@ -22,7 +22,8 @@ data class ProxyOptions(
     /** Accept an unauthenticated PROXY v1 header only behind a trusted reverse proxy. */
     val proxyProtocolEnabled: Boolean = false,
     /** Upstream --no-secure for CF Proxy/Worker only; never the default. */
-    val cfPlaintextEnabled: Boolean = false
+    val cfPlaintextEnabled: Boolean = false,
+    val cfAutoFallbackEnabled: Boolean = false
 ) {
     val fakeTlsEnabled: Boolean
         get() = fakeTlsDomain.isNotBlank()
