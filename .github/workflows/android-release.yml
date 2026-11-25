@@ -7,6 +7,11 @@ on:
         description: "Release tag (v2.0.0 or later)"
         required: true
         type: string
+      publish_release:
+        description: "Publish APK to GitHub Releases (unchecked: verify signature only)"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -170,6 +175,7 @@ jobs:
           printf '%s\n' "$EXPECTED_CERT" > "$OUT/release-certificate.sha256"
           cp "$RUNNER_TEMP/unsigned/notes.md" "$OUT/notes.md"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.publish_release
         with:
           name: signed-release
           path: ${{ runner.temp }}/signed/
@@ -178,7 +184,7 @@ jobs:
 
   publish:
     needs: [build, sign]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.publish_release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

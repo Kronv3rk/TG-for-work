@@ -617,18 +617,31 @@ class TelegramProxy(
         val transport = h2Transport ?: return false
         val domains = cfBalancer.getDomainsForDc(dcId).take(MAX_CF_ATTEMPTS)
             .map { "kws$dcId.$it" }
-        val begin = System.currentTimeMillis()
+        val begin = System.nanoTime()
+        val generation = relayProbeGeneration.get()
         val channel = transport.open(domains) ?: return false
-        val elapsed = System.currentTimeMillis() - begin
-        cfProxyConnections.incrementAndGet()
-        routePlanner.markConnected(RouteMethod.HTTP2, dcId, isMedia, elapsed)
-        ConnectionLog.connected(RouteMethod.HTTP2, dcId, isMedia, elapsed, "Cloudflare /api")
-        lastMessage = routePlanner.status()
+        if (client.isClosed || generation != relayProbeGeneration.get()) {
+            channel.close()
+            return false
+        }
+        val firstPayloadMs = AtomicLong(-1L)
         val start = System.currentTimeMillis()
-        val received = bridgeClientAndHttp2(client, clientIn, clientOut, channel, crypto, protocol)
-        if (received == 0L || channel.failed) {
-            routePlanner.markFailed(RouteMethod.HTTP2, dcId, isMedia)
-            if (received == 0L) ConnectionLog.noData(RouteMethod.HTTP2, dcId, isMedia)
+        val received = bridgeClientAndHttp2(client, clientIn, clientOut, channel, crypto, protocol) {
+            val elapsed = (System.nanoTime() - begin) / 1_000_000L
+            if (generation == relayProbeGeneration.get() && firstPayloadMs.compareAndSet(-1L, elapsed)) {
+                cfProxyConnections.incrementAndGet()
+                routePlanner.markActive(RouteMethod.HTTP2, dcId, isMedia)
+                ConnectionLog.connected(RouteMethod.HTTP2, dcId, isMedia, elapsed, "Cloudflare /api")
+                lastMessage = routePlanner.status()
+            }
+        }
+        if (generation == relayProbeGeneration.get()) {
+            if (firstPayloadMs.get() < 0 || channel.failed) {
+                routePlanner.markFailed(RouteMethod.HTTP2, dcId, isMedia)
+                if (firstPayloadMs.get() < 0) ConnectionLog.noData(RouteMethod.HTTP2, dcId, isMedia)
+            } else {
+                routePlanner.markConnected(RouteMethod.HTTP2, dcId, isMedia, firstPayloadMs.get())
+            }
         }
         if (received > 0L) {
             ConnectionLog.sessionEnd(
@@ -644,7 +657,8 @@ class TelegramProxy(
         clientOut: OutputStream,
         channel: CfH2Transport.Channel,
         crypto: CryptoContext,
-        protocol: Int
+        protocol: Int,
+        onPayload: () -> Unit
     ): Long {
         val done = AtomicInteger(0)
         val sessionDown = AtomicLong(0)
@@ -659,6 +673,7 @@ class TelegramProxy(
                         clientOut.flush()
                         sessionDown.addAndGet(body.size.toLong())
                         bytesDown.addAndGet(body.size.toLong())
+                        if (body.size >= 24 && !channel.failed) onPayload()
                     }
                 } catch (error: Exception) {
                     ConnectionLog.info("HTTP/2 загрузка: ${ConnectionLog.failureReason(error)}")

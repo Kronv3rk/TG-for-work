@@ -71,8 +71,8 @@
     <string name="settings_proxy_protocol_hint">Только при работе за собственным NGINX или HAProxy, который добавляет такой заголовок. Для прямого подключения Telegram выключите: заголовок не защищён и не является частью MTProto.</string>
     <string name="settings_force_test_dc_label">Только тестовые дата-центры Telegram</string>
     <string name="settings_force_test_dc_hint">Для разработчиков: принудительно направляет подключения к тестовому окружению Telegram. Обычные аккаунты через этот прокси работать не будут. Если клиент передаёт номера дата-центров 10001–10003, переключатель не нужен.</string>
-    <string name="settings_h2_media_label">Экспериментальный HTTP/2 для медиа через Cloudflare</string>
-    <string name="settings_h2_media_hint">Требуется включённый Cloudflare. По умолчанию выключен. Передаёт медиапакеты параллельными запросами HTTP/2; если HTTP/2 не согласован, приложение использует прежние маршруты. Экспериментальный режим: совместимость с реальными Cloudflare-серверами и телефонами ещё проверяется.</string>
+    <string name="settings_h2_media_label">Автоматический HTTP/2 для медиа</string>
+    <string name="settings_h2_media_hint">Резервный маршрут для медиаданных при включённом Cloudflare. Сначала используются обычные маршруты. HTTP/2 получает приоритет только после успешных сессий. Пока отключён по умолчанию: работа зависит от доступности серверов.</string>
     <string name="settings_pool_label">Держать WebSocket-соединения наготове (только Wi-Fi)</string>
     <string name="settings_pool_hint">Чаты и медиа открываются быстрее. Соединения держатся только для используемых дата-центров и закрываются через 5 минут без активности.</string>
     <string name="settings_fronting_label">Domain fronting: SNI (экспериментально)</string>
