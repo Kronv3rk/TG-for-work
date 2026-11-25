@@ -1,233 +1,158 @@
 name: Android Release
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "release/v1.11.0.request"
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, for example v1.0.0"
+        description: "Release tag (v2.0.0 or later)"
         required: true
         type: string
 
 permissions:
-  contents: write
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  contents: read
 
 concurrency:
-  group: android-release-${{ github.workflow }}-${{ github.ref }}
+  group: android-release
   cancel-in-progress: false
 
 jobs:
-  build-and-publish:
-    name: Build APK and publish release
+  build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-
+    timeout-minutes: 35
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
-
-      - name: Resolve version and prevent duplicate releases
+          persist-credentials: false
+      - name: Validate release
         id: meta
         shell: bash
         env:
-          INPUT_TAG: ${{ inputs.tag }}
-          EVENT_NAME: ${{ github.event_name }}
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            TAG="$INPUT_TAG"
-          elif [[ "$REF_TYPE" == "branch" && "$REF_NAME" == "main" ]]; then
-            TAG="$(cat release/v1.11.0.request)"
-          else
-            TAG="$REF_NAME"
-          fi
-
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Invalid release tag format" >&2
+          [[ "$TAG" =~ ^v[2-9][0-9]*\.[0-9]+\.[0-9]+$ || "$TAG" =~ ^v[1-9][0-9]+\.[0-9]+\.[0-9]+$ ]]
+          VERSION="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          CODE="$(sed -n 's/^[[:space:]]*versionCode = \([0-9]*\).*/\1/p' app/build.gradle.kts | head -n 1)"
+          [[ "$TAG" == "v$VERSION" && "$CODE" =~ ^[0-9]+$ && "$CODE" -gt 31 ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" == "$GITHUB_SHA" ]]
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release already exists"
             exit 1
           fi
-
-          VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)"
-          VERSION_CODE="$(sed -n 's/^[[:space:]]*versionCode = \([0-9]*\).*/\1/p' app/build.gradle.kts | head -n 1)"
-          if [[ "v$VERSION_NAME" != "$TAG" || -z "$VERSION_CODE" ]]; then
-            echo "::error::Tag $TAG does not match Gradle versionName ($VERSION_NAME)" >&2
-            exit 1
-          fi
-
-          git fetch origin main --no-tags
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::Only commits on main may be released" >&2
-            exit 1
-          fi
-
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::Release $TAG already exists. Published APKs are immutable." >&2
-            exit 1
-          fi
+          test -s "release-notes/$TAG.md"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Install Android SDK packages
-        shell: bash
-        run: |
-          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          if [[ ! -x "$SDKMANAGER" ]]; then
-            SDKMANAGER="$(command -v sdkmanager || true)"
-          fi
-          if [[ -z "$SDKMANAGER" ]]; then
-            echo "sdkmanager was not found" >&2
-            exit 1
-          fi
-
-          set +o pipefail
-          yes | "$SDKMANAGER" --licenses >/dev/null
-          set -o pipefail
-
-          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
-
-      - name: Configure release signing
-        id: signing
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          cache-disabled: true
+      - name: Test and build unsigned release
         shell: bash
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/signing"
-          KEYSTORE_FILE="$RUNNER_TEMP/signing/release.jks"
-
-          # Count how many of the four signing secrets are present so a partial
-          # setup fails loudly instead of silently signing with the fallback key.
-          SECRET_COUNT=0
-          for value in "$ANDROID_KEYSTORE_BASE64" "$ANDROID_KEYSTORE_PASSWORD" "$ANDROID_KEY_ALIAS" "$ANDROID_KEY_PASSWORD"; do
-            [[ -n "$value" ]] && SECRET_COUNT=$((SECRET_COUNT + 1))
-          done
-
-          if [[ "$SECRET_COUNT" -eq 4 ]]; then
-            echo "Signing with key from repository secrets."
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
-            STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
-            KEY_ALIAS="$ANDROID_KEY_ALIAS"
-            KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
-          elif [[ "$SECRET_COUNT" -ne 0 ]]; then
-            echo "Partial release signing secrets detected ($SECRET_COUNT/4 set)." >&2
-            echo "Set all of ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD, or none to use the committed key." >&2
-            exit 1
-          else
-            echo "Signing with committed fallback key (app/signing/release-keystore.b64)."
-            base64 --decode < app/signing/release-keystore.b64 > "$KEYSTORE_FILE"
-            STORE_PASSWORD="LeYIC8VM6c8hG7QUrItSRBYB3Pyu4gDf"
-            KEY_ALIAS="tgforwork"
-            KEY_PASSWORD="LeYIC8VM6c8hG7QUrItSRBYB3Pyu4gDf"
-          fi
-
-          {
-            echo "ANDROID_KEYSTORE_FILE=$KEYSTORE_FILE"
-            echo "ANDROID_KEYSTORE_PASSWORD=$STORE_PASSWORD"
-            echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
-            echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
-          } >> "$GITHUB_ENV"
-
-      - name: Build APK
-        id: build
-        shell: bash
-        run: |
-          TAG="${{ steps.meta.outputs.tag }}"
-          chmod +x ./gradlew
-
-          ./gradlew :app:testDebugUnitTest :app:assembleRelease --no-daemon --stacktrace
-          APK_PATH="$(find app/build/outputs/apk/release -name '*.apk' ! -name '*-unsigned.apk' | head -n 1)"
-          APK_KIND="release-signed"
-
-          if [[ -z "$APK_PATH" || ! -f "$APK_PATH" ]]; then
-            echo "Signed APK was not produced" >&2
-            exit 1
-          fi
-
-          ASSET_NAME="TG-for-work-${TAG}-${APK_KIND}.apk"
-          ASSET_PATH="$RUNNER_TEMP/$ASSET_NAME"
-          cp "$APK_PATH" "$ASSET_PATH"
-
-          echo "asset_name=$ASSET_NAME" >> "$GITHUB_OUTPUT"
-          echo "asset_path=$ASSET_PATH" >> "$GITHUB_OUTPUT"
-          echo "apk_kind=$APK_KIND" >> "$GITHUB_OUTPUT"
-
-      - name: Verify APK signature and existing-installation compatibility
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
-          APK="${{ steps.build.outputs.asset_path }}"
-          APKSIGNER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner"
-          "$APKSIGNER" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/new-signing.txt"
-
-          mkdir -p "$RUNNER_TEMP/previous"
-          gh release download v1.11.1 --pattern '*-release-signed.apk' --dir "$RUNNER_TEMP/previous"
-          PREVIOUS="$(find "$RUNNER_TEMP/previous" -maxdepth 1 -name '*.apk' | head -n 1)"
-          if [[ -z "$PREVIOUS" || ! -f "$PREVIOUS" ]]; then
-            echo "::error::Previous release APK is missing" >&2
-            exit 1
-          fi
-          "$APKSIGNER" verify --verbose --print-certs "$PREVIOUS" > "$RUNNER_TEMP/old-signing.txt"
-          NEW_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/new-signing.txt" | head -n 1)"
-          OLD_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/old-signing.txt" | head -n 1)"
-          if [[ -z "$NEW_CERT" || -z "$OLD_CERT" || "$NEW_CERT" != "$OLD_CERT" ]]; then
-            echo "::error::Release signing certificate does not match v1.11.1. Existing users cannot update." >&2
-            exit 1
-          fi
-          (cd "$RUNNER_TEMP" && sha256sum "$(basename "$APK")") > "$APK.sha256"
-          echo "APK signature verified and compatible with v1.11.1"
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+          test -s app/build/outputs/apk/release/app-release-unsigned.apk
+          mkdir -p "$RUNNER_TEMP/unsigned"
+          cp app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/unsigned/app.apk"
+          cp "release-notes/$TAG.md" "$RUNNER_TEMP/unsigned/notes.md"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ${{ steps.build.outputs.asset_name }}
-          path: |
-            ${{ steps.build.outputs.asset_path }}
-            ${{ steps.build.outputs.asset_path }}.sha256
+          name: unsigned-release
+          path: ${{ runner.temp }}/unsigned/
+          retention-days: 1
           if-no-files-found: error
 
-      - name: Publish verified GitHub Release
+  sign:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: android-release
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: unsigned-release
+          path: ${{ runner.temp }}/unsigned
+      - name: Install Android signing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "build-tools;35.0.0"
+      - name: Sign and verify the pinned certificate
         shell: bash
         env:
+          TAG: ${{ needs.build.outputs.tag }}
+          KEYSTORE_B64: ${{ secrets.TG_RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.TG_RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TG_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.TG_RELEASE_KEY_PASSWORD }}
+          EXPECTED_CERT: ${{ vars.TG_RELEASE_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          for name in KEYSTORE_B64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD EXPECTED_CERT; do
+            [[ -n "${!name}" ]] || { echo "::error::Release signing configuration incomplete ($name)"; exit 1; }
+          done
+          EXPECTED_CERT="${EXPECTED_CERT,,}"
+          [[ "$EXPECTED_CERT" =~ ^[a-f0-9]{64}$ ]]
+          WORK="$(mktemp -d)"
+          trap 'rm -rf "$WORK"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$WORK/release.jks"
+          unset KEYSTORE_B64
+          TOOLS="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/35.0.0"
+          OUT="$RUNNER_TEMP/signed"
+          mkdir -p "$OUT"
+          APK="$OUT/TG-for-work-$TAG-release-signed.apk"
+          "$TOOLS/zipalign" -f -P 16 4 "$RUNNER_TEMP/unsigned/app.apk" "$WORK/aligned.apk"
+          "$TOOLS/apksigner" sign --ks "$WORK/release.jks" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:STORE_PASSWORD --key-pass env:KEY_PASSWORD \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --out "$APK" "$WORK/aligned.apk"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$APK" > "$WORK/certs.txt"
+          mapfile -t CERTS < <(sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' "$WORK/certs.txt")
+          [[ "${#CERTS[@]}" -eq 1 && "${CERTS[0],,}" == "$EXPECTED_CERT" ]]
+          (cd "$OUT" && sha256sum "$(basename "$APK")" > "$(basename "$APK").sha256")
+          printf '%s\n' "$EXPECTED_CERT" > "$OUT/release-certificate.sha256"
+          cp "$RUNNER_TEMP/unsigned/notes.md" "$OUT/notes.md"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signed-release
+          path: ${{ runner.temp }}/signed/
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: [build, sign]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: signed-release
+          path: ${{ runner.temp }}/signed
+      - name: Publish signed APK and checksums
+        shell: bash
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="${{ steps.meta.outputs.tag }}"
-          APK="${{ steps.build.outputs.asset_path }}"
-          NOTES="$RUNNER_TEMP/release-notes.md"
-          SOURCE_NOTES="release-notes/$TAG.md"
-          if [[ ! -s "$SOURCE_NOTES" ]]; then
-            echo "::error::Dedicated release notes missing: $SOURCE_NOTES" >&2
-            exit 1
-          fi
-          cp "$SOURCE_NOTES" "$NOTES"
-          gh release create "$TAG" "$APK" "$APK.sha256" \
-            --title "TG-for-work $TAG" \
-            --notes-file "$NOTES" \
-            --target "$GITHUB_SHA"
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')" == "$GITHUB_SHA" ]]
+          cd "$RUNNER_TEMP/signed"
+          APK="TG-for-work-$TAG-release-signed.apk"
+          sha256sum --check "$APK.sha256"
+          gh release create "$TAG" "$APK" "$APK.sha256" release-certificate.sha256 \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "TG-for-work $TAG" --notes-file notes.md
