@@ -63,9 +63,12 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
         // is tried first, then the second best, and so on. Unproven routes keep a
         // neutral prior, so the stable sort preserves the network-policy base
         // order between them until real measurements arrive.
-        val candidates = available.ifEmpty { base }
+        val candidates = available.ifEmpty { base.filterNot { it == RouteMethod.HTTP2 } }
         return candidates.sortedByDescending { method ->
-            health[RouteKey(method, dcId, isMedia)]?.score() ?: RouteHealth.NEUTRAL_SCORE
+            val routeHealth = health[RouteKey(method, dcId, isMedia)]
+            if (method == RouteMethod.HTTP2 && (routeHealth?.consecutiveSuccesses ?: 0) < 2) {
+                Double.NEGATIVE_INFINITY
+            } else routeHealth?.score() ?: RouteHealth.NEUTRAL_SCORE
         }
     }
 
@@ -152,7 +155,7 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
         }
         val withFronting = if (options.frontingEnabled) "$core, fronting" else core
         val policy = if (options.cfWorkerEnabled) "Свой CF Worker → $withFronting" else withFronting
-        return if (options.cfH2MediaEnabled && options.cfProxyEnabled) "$policy · HTTP/2 медиа (эксп.)" else policy
+        return if (options.cfH2MediaEnabled && options.cfProxyEnabled) "$policy · HTTP/2 для медиа" else policy
     }
 
     fun status(): String = lastStatus.get()
@@ -167,6 +170,10 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
         lastFailureAt.remove(key)
         health.getOrPut(key, ::RouteHealth).recordSuccess(connectMs)
         lastStatus.set("$label активен: ${targetLabel(dcId, isMedia)}")
+    }
+
+    fun markActive(method: RouteMethod, dcId: Int, isMedia: Boolean) {
+        lastStatus.set("${method.label} активен: ${targetLabel(dcId, isMedia)}")
     }
 
     fun markFailed(method: RouteMethod, dcId: Int, isMedia: Boolean) {
@@ -241,9 +248,7 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
             core
         }
         val withH2 = if (isMedia && options.cfProxyEnabled && options.cfH2MediaEnabled) {
-            withFronting.flatMap {
-                if (it == RouteMethod.CLOUDFLARE) listOf(RouteMethod.HTTP2, it) else listOf(it)
-            }
+            withFronting + RouteMethod.HTTP2
         } else {
             withFronting
         }
@@ -291,8 +296,13 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
         @Volatile
         var samples: Int = 0
 
+        @Volatile
+        var consecutiveSuccesses: Int = 0
+            private set
+
         @Synchronized
         fun recordSuccess(connectMs: Long) {
+            consecutiveSuccesses = (consecutiveSuccesses + 1).coerceAtMost(2)
             successEwma = successEwma * (1 - ALPHA) + ALPHA
             if (connectMs >= 0) {
                 latencyEwmaMs = if (latencyEwmaMs == 0.0) {
@@ -306,6 +316,7 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
 
         @Synchronized
         fun recordFailure() {
+            consecutiveSuccesses = 0
             successEwma *= (1 - ALPHA)
             samples++
         }

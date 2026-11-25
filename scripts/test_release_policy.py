@@ -36,6 +36,12 @@ class ReleasePolicyTest(unittest.TestCase):
         self.assertIn("needs: [build, sign]", publish)
         self.assertNotIn("secrets.", publish)
 
+    def test_publication_requires_explicit_confirmation(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertRegex(text, r"(?s)publish_release:\s+description:.*?default: false\s+type: boolean")
+        self.assertIn("if: inputs.publish_release", text)
+        self.assertIn("if: github.ref == 'refs/heads/main' && inputs.publish_release", text)
+
     def test_all_actions_are_pinned(self):
         text = WORKFLOW.read_text(encoding="utf-8")
         for ref in re.findall(r"uses:\s+\S+@([^\s]+)", text):

@@ -88,7 +88,7 @@ class RoutePlannerTest {
         val planner = RoutePlanner()
         val experimental = options(cf = true, cfPriority = true).copy(cfH2MediaEnabled = true)
         val media = planner.methodsFor(2, true, experimental)
-        assertEquals(RouteMethod.HTTP2, media.first())
+        assertEquals(RouteMethod.HTTP2, media.last())
         assertTrue(media.contains(RouteMethod.CLOUDFLARE))
         assertFalse(planner.methodsFor(2, false, experimental).contains(RouteMethod.HTTP2))
         assertFalse(planner.methodsFor(2, true, options()).contains(RouteMethod.HTTP2))
@@ -265,5 +265,55 @@ class RoutePlannerTest {
         planner.markFailed(RouteMethod.FRONTING, 2, false)
         assertFalse(planner.methodsFor(2, false, options(fronting = "example.org")).contains(RouteMethod.FRONTING))
         assertEquals(1_800_000L, RouteMethod.FRONTING.cooldownMs)
+    }
+
+    @Test
+    fun h2IsNotPromotedAfterOneSuccessfulSession() {
+        val planner = RoutePlanner()
+        val enabled = options().copy(cfH2MediaEnabled = true)
+        planner.markConnected(RouteMethod.HTTP2, 2, true, 100)
+        assertEquals(RouteMethod.HTTP2, planner.methodsFor(2, true, enabled).last())
+    }
+
+    @Test
+    fun provenH2CanOutrankSlowerMediaRoutesButNotOtherTargets() {
+        val planner = RoutePlanner()
+        val enabled = options().copy(cfH2MediaEnabled = true)
+        repeat(2) { planner.markConnected(RouteMethod.HTTP2, 2, true, 100) }
+        repeat(2) { planner.markConnected(RouteMethod.CLOUDFLARE, 2, true, 4000) }
+        assertEquals(RouteMethod.HTTP2, planner.methodsFor(2, true, enabled).first())
+        assertEquals(RouteMethod.HTTP2, planner.methodsFor(4, true, enabled).last())
+        planner.resetNetworkState()
+        assertEquals(RouteMethod.HTTP2, planner.methodsFor(2, true, enabled).last())
+    }
+
+    @Test
+    fun failedH2IsExcludedEvenWhenAllOtherRoutesAreCoolingDown() {
+        val planner = RoutePlanner()
+        val enabled = options().copy(cfH2MediaEnabled = true)
+        RouteMethod.values().forEach { planner.markFailed(it, 2, true) }
+        val routes = planner.methodsFor(2, true, enabled)
+        assertTrue(routes.isNotEmpty())
+        assertFalse(routes.contains(RouteMethod.HTTP2))
+    }
+
+    @Test
+    fun h2FailureRevokesPreviousPromotion() {
+        var now = 1000L
+        val planner = RoutePlanner { now }
+        val enabled = options().copy(cfH2MediaEnabled = true)
+        repeat(2) { planner.markConnected(RouteMethod.HTTP2, 2, true, 100) }
+        planner.markFailed(RouteMethod.HTTP2, 2, true)
+        now += 30_001
+        planner.markConnected(RouteMethod.HTTP2, 2, true, 100)
+        assertEquals(RouteMethod.HTTP2, planner.methodsFor(2, true, enabled).last())
+    }
+
+    @Test
+    fun h2NeverUsedOnTestDcOrWhenCloudflareIsDisabled() {
+        val planner = RoutePlanner()
+        val enabled = options().copy(cfH2MediaEnabled = true)
+        assertFalse(planner.methodsFor(2, true, enabled, isTestDc = true).contains(RouteMethod.HTTP2))
+        assertFalse(planner.methodsFor(2, true, enabled.copy(cfProxyEnabled = false)).contains(RouteMethod.HTTP2))
     }
 }
