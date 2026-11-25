@@ -68,7 +68,22 @@ jobs:
           cache-disabled: true
       - name: Install Android SDK
         shell: bash
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [[ ! -f "$SDK/platforms/android-35/android.jar" || ! -x "$SDK/build-tools/35.0.0/apksigner" ]]; then
+            MANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+            if [[ ! -x "$MANAGER" ]]; then
+              mapfile -t MANAGERS < <(find "$SDK/cmdline-tools" -type f -name sdkmanager | sort -V)
+              [[ "${#MANAGERS[@]}" -gt 0 ]]
+              MANAGER="${MANAGERS[-1]}"
+            fi
+            "$MANAGER" --sdk_root="$SDK" "platforms;android-35" "build-tools;35.0.0"
+          fi
+          test -f "$SDK/platforms/android-35/android.jar"
+          test -x "$SDK/build-tools/35.0.0/apksigner"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
       - name: Test and build unsigned release
         shell: bash
         env:
@@ -103,7 +118,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "build-tools;35.0.0"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [[ ! -x "$SDK/build-tools/35.0.0/apksigner" || ! -x "$SDK/build-tools/35.0.0/zipalign" || ! -x "$SDK/build-tools/35.0.0/aapt" ]]; then
+            MANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+            if [[ ! -x "$MANAGER" ]]; then
+              mapfile -t MANAGERS < <(find "$SDK/cmdline-tools" -type f -name sdkmanager | sort -V)
+              [[ "${#MANAGERS[@]}" -gt 0 ]]
+              MANAGER="${MANAGERS[-1]}"
+            fi
+            "$MANAGER" --sdk_root="$SDK" "build-tools;35.0.0"
+          fi
+          for tool in apksigner zipalign aapt; do
+            test -x "$SDK/build-tools/35.0.0/$tool"
+          done
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
       - name: Check previous release
         id: previous
         shell: bash
