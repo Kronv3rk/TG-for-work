@@ -42,6 +42,13 @@ class ReleasePolicyTest(unittest.TestCase):
         self.assertIn("if: inputs.publish_release", text)
         self.assertIn("if: github.ref == 'refs/heads/main' && inputs.publish_release", text)
 
+    def test_sdk_setup_does_not_depend_on_sdkmanager_in_path(self):
+        text = WORKFLOW.read_text(encoding="utf-8")
+        self.assertNotRegex(text, r"(?m)^\s*(?:run:\s*)?sdkmanager\s")
+        self.assertIn('cmdline-tools/latest/bin/sdkmanager', text)
+        self.assertIn('build-tools/35.0.0/apksigner', text)
+        self.assertIn('platforms/android-35/android.jar', text)
+
     def test_all_actions_are_pinned(self):
         text = WORKFLOW.read_text(encoding="utf-8")
         for ref in re.findall(r"uses:\s+\S+@([^\s]+)", text):
