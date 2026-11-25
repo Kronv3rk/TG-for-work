@@ -13,8 +13,50 @@ internal class WorkerPool<T : Closeable>(
     isOpen: (T) -> Boolean,
     isActive: () -> Boolean,
     background: (Runnable) -> Unit,
-    clock: () -> Long = System::currentTimeMillis
+    private val clock: () -> Long = System::currentTimeMillis
 ) : Closeable {
+    private val cooldownLock = Any()
+    private val cooldownUntil = mutableMapOf<String, Long>()
+    private val quotaUntil = mutableMapOf<String, Long>()
+    private var generation = 0L
+
+    private companion object { const val DAY_MS = 86_400_000L }
+
+    fun availableDomains(domains: List<String>): List<String> = synchronized(cooldownLock) {
+        val now = clock()
+        cooldownUntil.entries.removeAll { it.value <= now }
+        quotaUntil.entries.removeAll { it.value <= now }
+        domains.filter { it.isNotBlank() && it !in cooldownUntil && it !in quotaUntil }.distinct()
+    }
+
+    fun dial(domain: String, connect: () -> T): T {
+        val attemptGeneration = synchronized(cooldownLock) {
+            val now = clock()
+            check((cooldownUntil[domain] ?: Long.MIN_VALUE) <= now &&
+                (quotaUntil[domain] ?: Long.MIN_VALUE) <= now) {
+                "Worker is temporarily unavailable"
+            }
+            generation
+        }
+        try {
+            return connect()
+        } catch (error: Exception) {
+            synchronized(cooldownLock) {
+                val now = clock()
+                if (error is WebSocketHandshakeException && error.statusCode == 429) {
+                    // Worker daily request quota resets at midnight UTC.
+                    val until = now - Math.floorMod(now, DAY_MS) + DAY_MS
+                    quotaUntil[domain] = maxOf(quotaUntil[domain] ?: 0L, until)
+                } else if (generation == attemptGeneration &&
+                    (error is java.net.SocketTimeoutException ||
+                        error is WebSocketHandshakeException && error.statusCode in 500..599)) {
+                    cooldownUntil[domain] = maxOf(cooldownUntil[domain] ?: 0L, now + 60_000L)
+                }
+            }
+            throw error
+        }
+    }
+
     private val delegate = WsPool(
         size = size,
         connector = { target, domain ->
@@ -22,7 +64,7 @@ internal class WorkerPool<T : Closeable>(
             require(separator > 0) { "Invalid Worker destination" }
             val dcId = target.substring(0, separator).toInt()
             val destination = target.substring(separator + 1)
-            connector(dcId, destination, domain)
+            dial(domain) { connector(dcId, destination, domain) }
         },
         isOpen = isOpen,
         isTargetBlocked = { false },
@@ -46,7 +88,13 @@ internal class WorkerPool<T : Closeable>(
         return delegate.get(WsPool.Key(dcId, false), "$dcId|$destination", uniqueDomains)
     }
 
-    fun clear() = delegate.clear()
+    fun clear() {
+        synchronized(cooldownLock) {
+            generation++
+            cooldownUntil.clear()
+        }
+        delegate.clear()
+    }
     fun maintain() = delegate.maintain()
     override fun close() = delegate.close()
 }

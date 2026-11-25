@@ -79,7 +79,7 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
      */
     fun connectTimeoutMs(method: RouteMethod, dcId: Int, isMedia: Boolean, attempt: Int = 0): Int {
         val failedAt = lastFailureAt[RouteKey(method, dcId, isMedia)]
-        val sinceFailure = failedAt?.let { System.currentTimeMillis() - it }
+        val sinceFailure = failedAt?.let { clockMs() - it }
         val base = if (sinceFailure != null && sinceFailure in 0 until PROBATION_WINDOW_MS) {
             PROBATION_CONNECT_MS
         } else {
@@ -145,7 +145,7 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
 
     fun policyLabel(options: ProxyOptions): String {
         val core = when {
-            options.cellularNetwork && options.cfProxyEnabled -> "Авто: мобильная сеть, CF > WS > TCP"
+            options.cfProxyEnabled && options.cfProxyPriority && (options.cfPlaintextEnabled || options.cfAutoFallbackEnabled) -> "Авто: CF > WS > TCP"
             options.cellularNetwork -> "Авто: мобильная сеть, WS > TCP"
             options.cfProxyEnabled -> "Авто: WS, CF для медиа, TCP запасной"
             else -> "Авто: WS > TCP"
@@ -161,16 +161,16 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
         lastStatus.set("Пробуем ${method.title}: ${targetLabel(dcId, isMedia)}")
     }
 
-    fun markConnected(method: RouteMethod, dcId: Int, isMedia: Boolean, connectMs: Long = -1L) {
+    fun markConnected(method: RouteMethod, dcId: Int, isMedia: Boolean, connectMs: Long = -1L, label: String = method.label) {
         val key = RouteKey(method, dcId, isMedia)
         cooldownUntil.remove(key)
         lastFailureAt.remove(key)
         health.getOrPut(key, ::RouteHealth).recordSuccess(connectMs)
-        lastStatus.set("${method.label} активен: ${targetLabel(dcId, isMedia)}")
+        lastStatus.set("$label активен: ${targetLabel(dcId, isMedia)}")
     }
 
     fun markFailed(method: RouteMethod, dcId: Int, isMedia: Boolean) {
-        val now = System.currentTimeMillis()
+        val now = clockMs()
         val key = RouteKey(method, dcId, isMedia)
         cooldownUntil[key] = now + method.cooldownMs
         lastFailureAt[key] = now
@@ -207,7 +207,7 @@ class RoutePlanner(private val clockMs: () -> Long = System::currentTimeMillis) 
 
     private fun baseOrder(isMedia: Boolean, options: ProxyOptions): List<RouteMethod> {
         val core = when {
-            options.cellularNetwork && options.cfProxyEnabled -> listOf(
+            options.cfProxyEnabled && (options.cellularNetwork || options.cfProxyPriority && (options.cfPlaintextEnabled || options.cfAutoFallbackEnabled)) -> listOf(
                 RouteMethod.CLOUDFLARE,
                 RouteMethod.WEBSOCKET,
                 RouteMethod.TCP

@@ -13,6 +13,8 @@
 
     <application
         android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@drawable/ic_app_mark"
         android:label="@string/app_name"
         android:roundIcon="@drawable/ic_app_mark"
@@ -27,6 +29,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".NotificationActionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="" />
         <!--
             specialUse is declared alongside dataSync: from Android 15 a dataSync
             foreground service is capped at ~6 hours per day, which would stop a

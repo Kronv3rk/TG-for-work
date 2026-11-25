@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.ResultReceiver
 import android.text.method.PasswordTransformationMethod
 import android.provider.Settings
 import android.view.View
@@ -20,6 +21,8 @@ import android.view.WindowInsets
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.LinearLayout
+import android.view.Gravity
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -38,17 +41,19 @@ class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private val separators = Regex("[,\\s]+")
     private lateinit var connectButton: Button
-    private lateinit var checkConnectionButton: Button
     private lateinit var stopButton: Button
     private lateinit var copyButton: Button
     private lateinit var restartButton: Button
-    private lateinit var statusBadge: TextView
     private lateinit var heroTitle: TextView
     private lateinit var heroBody: TextView
     private lateinit var endpointValue: TextView
     private lateinit var detailsToggleButton: Button
     private lateinit var diagnosticsContainer: View
     private var diagnosticsExpanded = false
+    private var commandPending = false
+    private val settingsDraftState by lazy { androidx.lifecycle.ViewModelProvider(this)[SettingsDraftState::class.java] }
+    private var settingsDialog: AlertDialog? = null
+    private var captureSettingsDraft: (() -> SettingsDraft)? = null
     private lateinit var routeValue: TextView
     private lateinit var sessionsValue: TextView
     private lateinit var trafficValue: TextView
@@ -61,8 +66,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var connectionLogValue: TextView
     private lateinit var backgroundWarning: TextView
     private lateinit var buildInfoValue: TextView
-    private lateinit var fakeTlsSwitch: SwitchCompat
-    private lateinit var cfProxySwitch: SwitchCompat
     private lateinit var proxyRow: View
     private lateinit var profileRow: View
 
@@ -74,18 +77,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+        AppCompatDelegate.setDefaultNightMode(AppearancePreferences.load(this).nightMode)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         applySystemBars()
         applySystemInsets()
         requestNotificationPermission()
         bindViews()
+        adaptMetricRows()
         bindActions()
         diagnosticsExpanded = savedInstanceState?.getBoolean("diagnostics_expanded") ?: false
         setDiagnosticsExpanded(diagnosticsExpanded)
         buildInfoValue.text = buildInfoText()
         renderState(ProxyRuntime.snapshot(this))
+        settingsDraftState.take()?.let { showSettingsDialog(it) }
     }
 
     override fun onStart() {
@@ -99,6 +104,17 @@ class MainActivity : AppCompatActivity() {
         super.onStop()
     }
 
+    override fun onDestroy() {
+        if (isChangingConfigurations) {
+            settingsDraftState.retain(captureSettingsDraft?.invoke())
+        }
+        settingsDialog?.setOnDismissListener(null)
+        settingsDialog?.dismiss()
+        settingsDialog = null
+        captureSettingsDraft = null
+        super.onDestroy()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("diagnostics_expanded", diagnosticsExpanded)
         super.onSaveInstanceState(outState)
@@ -106,12 +122,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun bindViews() {
         connectButton = findViewById(R.id.connectButton)
-        checkConnectionButton = findViewById(R.id.checkConnectionButton)
         stopButton = findViewById(R.id.stopButton)
         copyButton = findViewById(R.id.settingsButton)
         restartButton = findViewById(R.id.logsButton)
-        statusBadge = findViewById(R.id.statusBadge)
         heroTitle = findViewById(R.id.heroTitle)
+        androidx.core.view.ViewCompat.setAccessibilityHeading(heroTitle, true)
+        heroTitle.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         heroBody = findViewById(R.id.heroBody)
         endpointValue = findViewById(R.id.endpointValue)
         detailsToggleButton = findViewById(R.id.detailsToggleButton)
@@ -128,26 +144,38 @@ class MainActivity : AppCompatActivity() {
         connectionLogValue = findViewById(R.id.connectionLogValue)
         backgroundWarning = findViewById(R.id.backgroundWarning)
         buildInfoValue = findViewById(R.id.buildInfoValue)
-        fakeTlsSwitch = findViewById(R.id.fakeTlsSwitch)
-        cfProxySwitch = findViewById(R.id.cfProxySwitch)
         proxyRow = findViewById(R.id.proxyRow)
         profileRow = findViewById(R.id.profileRow)
+    }
+
+    private fun adaptMetricRows() {
+        val configuration = resources.configuration
+        if (configuration.screenWidthDp >= 360 && configuration.fontScale < 1.3f) return
+        for (value in listOf(endpointValue, routeValue, sessionsValue, trafficValue, networkValue, linkModeValue)) {
+            val row = value.parent as? LinearLayout ?: continue
+            row.orientation = LinearLayout.VERTICAL
+            row.gravity = Gravity.START
+            for (index in 0 until row.childCount) {
+                val child = row.getChildAt(index)
+                val params = child.layoutParams as LinearLayout.LayoutParams
+                params.width = LinearLayout.LayoutParams.MATCH_PARENT
+                params.weight = 0f
+                params.marginStart = 0
+                params.marginEnd = 0
+                child.layoutParams = params
+                if (child is TextView) child.gravity = Gravity.START
+            }
+        }
     }
 
     private fun bindActions() {
         val options = ProxyRuntime.loadOptions(this)
         showEndpoint(options)
-        fakeTlsSwitch.isChecked = options.fakeTlsEnabled
-        cfProxySwitch.isChecked = options.cfProxyEnabled
-        attachSwitchListeners()
 
         connectButton.setOnClickListener {
             startProxy(openTelegram = true)
         }
 
-        checkConnectionButton.setOnClickListener {
-            startProxy(openTelegram = false)
-        }
 
         stopButton.setOnClickListener {
             if (ProxyRuntime.isRunning()) {
@@ -167,6 +195,7 @@ class MainActivity : AppCompatActivity() {
 
         proxyRow.setOnClickListener { copyProxyLink() }
         profileRow.setOnClickListener { showSettingsDialog() }
+        findViewById<Button>(R.id.appearanceRow).setOnClickListener { showAppearanceDialog() }
         detailsToggleButton.setOnClickListener { setDiagnosticsExpanded(!diagnosticsExpanded) }
 
         backgroundWarning.setOnClickListener { requestIgnoreBatteryOptimizations() }
@@ -196,28 +225,25 @@ class MainActivity : AppCompatActivity() {
         diagnosticsExpanded = expanded
         diagnosticsContainer.visibility = if (expanded) View.VISIBLE else View.GONE
         detailsToggleButton.setText(if (expanded) R.string.hide_diagnostics else R.string.show_diagnostics)
+        describeExpansion(detailsToggleButton, expanded)
+    }
+
+    private fun describeExpansion(button: View, expanded: Boolean) {
+        androidx.core.view.ViewCompat.setStateDescription(
+            button, getString(if (expanded) R.string.section_expanded else R.string.section_collapsed)
+        )
     }
 
     private fun applySystemInsets() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
-        // Android 15+ draws behind system bars for targetSdk 35. Apply the insets
-        // to the scroll container so header and bottom controls remain reachable.
-        val scroll = findViewById<View>(R.id.mainScroll)
-        val baseLeft = scroll.paddingLeft
-        val baseTop = scroll.paddingTop
-        val baseRight = scroll.paddingRight
-        val baseBottom = scroll.paddingBottom
-        scroll.setOnApplyWindowInsetsListener { view, insets ->
-            val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-            view.setPadding(
-                baseLeft + bars.left,
-                baseTop + bars.top,
-                baseRight + bars.right,
-                baseBottom + bars.bottom
-            )
-            insets
+        val scroll = findViewById<AdaptiveScrollView>(R.id.mainScroll)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            scroll.setOnApplyWindowInsetsListener { _, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                scroll.setSafeInsets(bars.left, bars.top, bars.right, bars.bottom)
+                insets
+            }
+            scroll.requestApplyInsets()
         }
-        scroll.requestApplyInsets()
     }
 
     /**
@@ -274,13 +300,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isIgnoringBatteryOptimizations(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+
         val power = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
         return power.isIgnoringBatteryOptimizations(packageName)
     }
 
     private fun requestIgnoreBatteryOptimizations() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+
         val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
             .setData(Uri.parse("package:$packageName"))
         val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
@@ -296,33 +322,23 @@ class MainActivity : AppCompatActivity() {
      * (Re)attaches the Fake TLS and Cloudflare switch listeners. Kept separate so
      * the switches can be resynced from saved options without firing a listener.
      */
-    private fun attachSwitchListeners() {
-        fakeTlsSwitch.setOnCheckedChangeListener { _, checked ->
-            val wasRunning = ProxyRuntime.isRunning()
-            ProxyRuntime.setFakeTlsEnabled(this, checked)
-            if (wasRunning) ProxyService.start(this)
-            Toast.makeText(
-                this,
-                if (checked) R.string.fake_tls_enabled else R.string.fake_tls_disabled,
-                Toast.LENGTH_SHORT
-            ).show()
-            renderState(ProxyRuntime.snapshot(this))
-        }
-
-        cfProxySwitch.setOnCheckedChangeListener { _, checked ->
-            val wasRunning = ProxyRuntime.isRunning()
-            ProxyRuntime.setCfProxyEnabled(this, checked)
-            if (wasRunning) ProxyService.start(this)
-            Toast.makeText(
-                this,
-                if (checked) R.string.cfproxy_enabled else R.string.cfproxy_disabled,
-                Toast.LENGTH_SHORT
-            ).show()
-            renderState(ProxyRuntime.snapshot(this))
-        }
+    private fun showAppearanceDialog() {
+        val modes = AppearanceMode.entries
+        val current = AppearancePreferences.load(this)
+        AlertDialog.Builder(this, R.style.AppAlertDialogTheme)
+            .setTitle(R.string.appearance_title)
+            .setSingleChoiceItems(modes.map { getString(it.label) }.toTypedArray(), modes.indexOf(current)) { dialog, index ->
+                val selected = modes[index]
+                AppearancePreferences.save(this, selected)
+                dialog.dismiss()
+                AppCompatDelegate.setDefaultNightMode(selected.nightMode)
+            }
+            .setNegativeButton(R.string.settings_cancel, null)
+            .show()
     }
 
-    private fun showSettingsDialog() {
+    private fun showSettingsDialog(draft: SettingsDraft? = null) {
+        if (settingsDialog?.isShowing == true) return
         val options = ProxyRuntime.loadOptions(this)
         val view = layoutInflater.inflate(R.layout.dialog_settings, null)
         val workerInput = view.findViewById<EditText>(R.id.workerDomainInput)
@@ -339,8 +355,50 @@ class MainActivity : AppCompatActivity() {
         val testDcCheck = view.findViewById<CheckBox>(R.id.forceTestDcCheck)
         val proxyProtocolCheck = view.findViewById<CheckBox>(R.id.proxyProtocolCheck)
         val cfPlaintextCheck = view.findViewById<CheckBox>(R.id.cfPlaintextCheck)
+        val cfAutoFallbackCheck = view.findViewById<CheckBox>(R.id.cfAutoFallbackCheck)
         val frontingInput = view.findViewById<EditText>(R.id.frontingSniInput)
         val toggleSecretButton = view.findViewById<Button>(R.id.toggleSecretButton)
+        val fakeTlsSwitch = view.findViewById<SwitchCompat>(R.id.fakeTlsSwitch)
+        val cfProxySwitch = view.findViewById<SwitchCompat>(R.id.cfProxySwitch)
+        val advanced = view.findViewById<View>(R.id.advancedSettings)
+        val advancedToggle = view.findViewById<Button>(R.id.advancedToggle)
+        val secretSection = view.findViewById<View>(R.id.secretSection)
+        val secretSectionToggle = view.findViewById<Button>(R.id.secretSectionToggle)
+
+        fun setSecretExpanded(expanded: Boolean) {
+            secretSection.visibility = if (expanded) View.VISIBLE else View.GONE
+            secretSectionToggle.setText(if (expanded) R.string.settings_secret_section_close else R.string.settings_secret_section_open)
+            describeExpansion(secretSectionToggle, expanded)
+            if (!expanded) {
+                secretInput.transformationMethod = PasswordTransformationMethod.getInstance()
+                toggleSecretButton.setText(R.string.settings_show_secret)
+            }
+        }
+        secretSectionToggle.setOnClickListener { setSecretExpanded(secretSection.visibility != View.VISIBLE) }
+
+        fun setAdvancedExpanded(expanded: Boolean) {
+            advanced.visibility = if (expanded) View.VISIBLE else View.GONE
+            advancedToggle.setText(if (expanded) R.string.settings_hide_advanced else R.string.settings_show_advanced)
+            describeExpansion(advancedToggle, expanded)
+        }
+        advancedToggle.setOnClickListener { setAdvancedExpanded(advanced.visibility != View.VISIBLE) }
+        setSecretExpanded(false)
+        setAdvancedExpanded(false)
+        fakeTlsSwitch.isChecked = options.fakeTlsEnabled
+        cfProxySwitch.isChecked = options.cfProxyEnabled
+        maskingInput.isEnabled = fakeTlsSwitch.isChecked
+        fakeTlsSwitch.setOnCheckedChangeListener { _, enabled ->
+            maskingInput.isEnabled = enabled
+            if (enabled && maskingInput.text.isNullOrBlank()) {
+                maskingInput.setText(ProxyOptions.DEFAULT_FAKE_TLS_DOMAIN)
+            }
+        }
+        fun showFieldError(field: EditText, message: Int) {
+            if (!field.isShown) {
+                if (field == secretInput) setSecretExpanded(true) else setAdvancedExpanded(true)
+            }
+            fieldError(field, message)
+        }
 
         workerInput.setText(options.cfWorkerDomain)
         maskingInput.setText(options.fakeTlsDomain)
@@ -356,7 +414,25 @@ class MainActivity : AppCompatActivity() {
         testDcCheck.isChecked = options.forceTestDc
         proxyProtocolCheck.isChecked = options.proxyProtocolEnabled
         cfPlaintextCheck.isChecked = options.cfPlaintextEnabled
+        cfAutoFallbackCheck.isChecked = options.cfAutoFallbackEnabled
+        cfPlaintextCheck.setOnCheckedChangeListener { _, checked -> if (checked) cfAutoFallbackCheck.isChecked = false }
+        cfAutoFallbackCheck.setOnCheckedChangeListener { _, checked -> if (checked) cfPlaintextCheck.isChecked = false }
         frontingInput.setText(options.frontingSni)
+
+        val fields = listOf(workerInput, maskingInput, secretInput, cfDomainInput, hostInput,
+            portInput, dcIpInput, bufferInput, maxConnInput, frontingInput)
+        val checks = listOf<android.widget.CompoundButton>(poolCheck, h2MediaCheck, testDcCheck,
+            proxyProtocolCheck, cfPlaintextCheck, cfAutoFallbackCheck, fakeTlsSwitch, cfProxySwitch)
+        // Keep drafts only in the ViewModel; never put a secret in saved-instance state.
+        secretInput.isSaveEnabled = false
+        if (draft != null) {
+            checks.forEach { check -> draft.checked[check.id]?.let { check.isChecked = it } }
+            fields.forEach { field -> draft.text[field.id]?.let { field.setText(it) } }
+            setAdvancedExpanded(draft.advancedExpanded)
+            setSecretExpanded(draft.secretExpanded)
+            secretInput.transformationMethod = PasswordTransformationMethod.getInstance()
+            toggleSecretButton.setText(R.string.settings_show_secret)
+        }
 
         view.findViewById<Button>(R.id.generateSecretButton).setOnClickListener {
             secretInput.setText(TelegramProxy.generateSecret())
@@ -371,23 +447,83 @@ class MainActivity : AppCompatActivity() {
             secretInput.setSelection(secretInput.text.length)
         }
         view.findViewById<Button>(R.id.copySecretButton).setOnClickListener {
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("secret", secretInput.text.toString().trim()))
+            SensitiveClipboard.copy(this, "secret", secretInput.text.toString().trim())
             Toast.makeText(this, R.string.settings_secret_copied, Toast.LENGTH_SHORT).show()
         }
 
-        // A standard positive button closes the dialog even after a field error.
-        // Keep it open until the settings are actually valid.
-        val dialog = AlertDialog.Builder(this)
+        val compact = resources.configuration.screenWidthDp < 360 || resources.configuration.screenHeightDp < 480 || resources.configuration.fontScale >= 1.3f
+        val builder = AlertDialog.Builder(this, R.style.AppAlertDialogTheme)
             .setTitle(R.string.settings_dialog_title)
-            .setView(view)
-            .setNegativeButton(R.string.settings_cancel, null)
-            .setPositiveButton(R.string.settings_save, null)
-            .create()
+        var compactSave: Button? = null
+        var compactCancel: Button? = null
+        if (compact) {
+            val dp = resources.displayMetrics.density
+            val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            content.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding((12 * dp).toInt(), 0, (12 * dp).toInt(), (8 * dp).toInt())
+            }
+            fun action(label: Int, buttonId: Int): Button =
+                androidx.appcompat.widget.AppCompatButton(this, null, androidx.appcompat.R.attr.borderlessButtonStyle).apply {
+                    id = buttonId
+                    setText(label)
+                    setAllCaps(false)
+                    textSize = 14f
+                    setTextColor(androidx.core.content.ContextCompat.getColor(this@MainActivity, R.color.brand_dark))
+                    minimumWidth = 0
+                    minWidth = 0
+                    minHeight = (48 * dp).toInt()
+                    setPadding((4 * dp).toInt(), 0, (4 * dp).toInt(), 0)
+                }
+            compactCancel = action(R.string.settings_cancel, android.R.id.button2)
+            compactSave = action(R.string.settings_save, android.R.id.button1)
+            actions.addView(compactCancel, LinearLayout.LayoutParams(0, -2, 1f))
+            actions.addView(compactSave, LinearLayout.LayoutParams(0, -2, 1f))
+            content.addView(actions, LinearLayout.LayoutParams(-1, -2))
+            builder.setView(content)
+        } else {
+            builder.setView(view)
+                .setNegativeButton(R.string.settings_cancel, null)
+                .setPositiveButton(R.string.settings_save, null)
+        }
+        val dialog = builder.create()
+        settingsDialog = dialog
+        captureSettingsDraft = {
+            SettingsDraft(
+                fields.associate { it.id to it.text.toString() },
+                checks.associate { it.id to it.isChecked },
+                advanced.visibility == View.VISIBLE,
+                secretSection.visibility == View.VISIBLE,
+                view.scrollY
+            )
+        }
+        dialog.setOnDismissListener {
+            if (settingsDialog === dialog) {
+                settingsDialog = null
+                captureSettingsDraft = null
+                settingsDraftState.retain(null)
+            }
+        }
         dialog.setOnShowListener {
-            dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+            dialog.window?.setBackgroundDrawableResource(R.drawable.bg_dialog)
+            val wide = resources.configuration.screenWidthDp >= 600
+            val width = if (wide) (560 * resources.displayMetrics.density).toInt() else -1
+            if (compact || wide) {
+                dialog.window?.setLayout(width, if (compact) -1 else -2)
+            }
+            val saveButton = compactSave ?: dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)
+            val cancelButton = compactCancel ?: dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE)
+            for (button in listOf(saveButton, cancelButton)) {
+                button.setAllCaps(false)
+                button.textSize = 14f
+            }
+            cancelButton.setOnClickListener { dialog.dismiss() }
+            saveButton.setOnClickListener {
                 val worker = workerInput.text.toString().trim()
-                val masking = maskingInput.text.toString().trim()
+                val masking = if (fakeTlsSwitch.isChecked) {
+                    maskingInput.text.toString().trim().ifBlank { ProxyOptions.DEFAULT_FAKE_TLS_DOMAIN }
+                } else ""
                 val secret = secretInput.text.toString().trim().lowercase()
                 val cfDomain = cfDomainInput.text.toString().trim()
                 val host = hostInput.text.toString().trim()
@@ -396,45 +532,45 @@ class MainActivity : AppCompatActivity() {
                 val frontingSni = frontingInput.text.toString().trim().lowercase()
 
                 if (secret.isNotEmpty() && !ProxyRuntime.isValidSecret(secret)) {
-                    fieldError(secretInput, R.string.settings_invalid_secret); return@setOnClickListener
+                    showFieldError(secretInput, R.string.settings_invalid_secret); return@setOnClickListener
                 }
                 if (worker.split(separators).filter { it.isNotEmpty() }
                         .any { CfProxyBalancer.normalizeDomain(it) == null }
                 ) {
-                    fieldError(workerInput, R.string.settings_invalid_worker); return@setOnClickListener
+                    showFieldError(workerInput, R.string.settings_invalid_worker); return@setOnClickListener
                 }
                 if (masking.isNotEmpty() && CfProxyBalancer.normalizeDomain(masking) == null) {
-                    fieldError(maskingInput, R.string.settings_invalid_masking); return@setOnClickListener
+                    showFieldError(maskingInput, R.string.settings_invalid_masking); return@setOnClickListener
                 }
                 if (cfDomain.isNotEmpty() && CfProxyBalancer.normalizeDomain(cfDomain) == null) {
-                    fieldError(cfDomainInput, R.string.settings_invalid_cfdomain); return@setOnClickListener
+                    showFieldError(cfDomainInput, R.string.settings_invalid_cfdomain); return@setOnClickListener
                 }
                 if (frontingSni.isNotEmpty() && CfProxyBalancer.normalizeDomain(frontingSni) == null) {
-                    fieldError(frontingInput, R.string.settings_invalid_fronting); return@setOnClickListener
+                    showFieldError(frontingInput, R.string.settings_invalid_fronting); return@setOnClickListener
                 }
                 if (!isValidHost(host)) {
-                    fieldError(hostInput, R.string.settings_invalid_host); return@setOnClickListener
+                    showFieldError(hostInput, R.string.settings_invalid_host); return@setOnClickListener
                 }
                 val port = portText.toIntOrNull()
                 if (port == null || port !in 1..65535) {
-                    fieldError(portInput, R.string.settings_invalid_port); return@setOnClickListener
+                    showFieldError(portInput, R.string.settings_invalid_port); return@setOnClickListener
                 }
                 // Every non-empty DC:IP token must parse, otherwise a typo would be
                 // silently dropped and the user would think the override is active.
                 if (dcIps.split(separators).filter { it.isNotEmpty() }
                         .any { ProxyOptions.parseDcIpPair(it) == null }
                 ) {
-                    fieldError(dcIpInput, R.string.settings_invalid_dcip); return@setOnClickListener
+                    showFieldError(dcIpInput, R.string.settings_invalid_dcip); return@setOnClickListener
                 }
 
                 val bufferKb = bufferInput.text.toString().trim().toIntOrNull()
                 if (bufferKb == null || bufferKb !in ProxyOptions.MIN_BUFFER_KB..ProxyOptions.MAX_BUFFER_KB) {
-                    fieldError(bufferInput, R.string.settings_invalid_buffer)
+                    showFieldError(bufferInput, R.string.settings_invalid_buffer)
                     return@setOnClickListener
                 }
                 val maxConnections = maxConnInput.text.toString().trim().toIntOrNull()
                 if (maxConnections == null || maxConnections !in ProxyOptions.MIN_MAX_CONNECTIONS..ProxyOptions.MAX_MAX_CONNECTIONS) {
-                    fieldError(maxConnInput, R.string.settings_invalid_connections)
+                    showFieldError(maxConnInput, R.string.settings_invalid_connections)
                     return@setOnClickListener
                 }
 
@@ -442,6 +578,7 @@ class MainActivity : AppCompatActivity() {
                     host = host,
                     port = port,
                     secretHex = if (secret.isEmpty()) options.secretHex else secret,
+                    cfProxyEnabled = cfProxySwitch.isChecked,
                     cfProxyUserDomain = cfDomain,
                     cfWorkerDomain = worker,
                     dcIpOverrides = dcIps,
@@ -453,6 +590,7 @@ class MainActivity : AppCompatActivity() {
                     forceTestDc = testDcCheck.isChecked,
                     proxyProtocolEnabled = proxyProtocolCheck.isChecked,
                     cfPlaintextEnabled = cfPlaintextCheck.isChecked,
+                    cfAutoFallbackEnabled = cfAutoFallbackCheck.isChecked && !cfPlaintextCheck.isChecked,
                     frontingSni = frontingSni
                 )
                 // Changing any of these rewrites the tg://proxy link, which makes the
@@ -462,15 +600,11 @@ class MainActivity : AppCompatActivity() {
                     updated.fakeTlsDomain != options.fakeTlsDomain ||
                     updated.host != options.host ||
                     updated.port != options.port
+                val wasRunning = ProxyRuntime.isRunning()
                 ProxyRuntime.saveOptions(this, updated)
                 showEndpoint(updated)
-                // Saving a custom masking domain can flip Fake TLS on or off, so
-                // resync the switch from the saved options without firing its
-                // listener — otherwise a later toggle would overwrite the domain.
-                fakeTlsSwitch.setOnCheckedChangeListener(null)
-                fakeTlsSwitch.isChecked = ProxyRuntime.loadOptions(this).fakeTlsEnabled
-                attachSwitchListeners()
-                if (ProxyRuntime.isRunning()) ProxyService.start(this)
+
+                if (wasRunning && updated != options) requestProxyAction(ProxyService.ACTION_RESTART)
                 renderState(ProxyRuntime.snapshot(this))
                 Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
@@ -478,6 +612,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         dialog.show()
+        if (draft != null) view.post { view.scrollTo(0, draft.scrollY) }
     }
 
     /**
@@ -486,14 +621,12 @@ class MainActivity : AppCompatActivity() {
      * handshake and shows "proxy uses incorrect settings".
      */
     private fun promptReconnectTelegram() {
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, R.style.AppAlertDialogTheme)
             .setTitle(R.string.link_changed_title)
             .setMessage(R.string.link_changed_body)
             .setNegativeButton(R.string.link_changed_later, null)
             .setPositiveButton(R.string.link_changed_open) { _, _ ->
-                ProxyRuntime.start(this)
-                ProxyService.start(this)
-                ProxyRuntime.openTelegram(this)
+                startProxy(openTelegram = true)
             }
             .show()
     }
@@ -512,52 +645,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startProxy(openTelegram: Boolean) {
-        try {
-            val proxy = ProxyRuntime.start(this)
-            ProxyService.start(this)
-            renderState(proxy.snapshot())
-            if (openTelegram) {
-                ProxyRuntime.openTelegram(this)
+        requestProxyAction(ProxyService.ACTION_START, openTelegram)
+    }
+
+    private fun requestProxyAction(action: String, openTelegram: Boolean = false) {
+        if (commandPending) return
+        commandPending = true
+        renderState(ProxyRuntime.snapshot(this))
+        val receiver = object : ResultReceiver(handler) {
+            override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                if (isFinishing || isDestroyed) return
+                commandPending = false
+                renderState(ProxyRuntime.snapshot(this@MainActivity))
+                if (resultCode == ProxyService.RESULT_OK) {
+                    when (action) {
+                        ProxyService.ACTION_STOP -> Toast.makeText(this@MainActivity, R.string.proxy_stopped_toast, Toast.LENGTH_SHORT).show()
+                        ProxyService.ACTION_RESTART -> Toast.makeText(this@MainActivity, R.string.proxy_restarted, Toast.LENGTH_SHORT).show()
+                    }
+                    if (openTelegram && ProxyRuntime.isRunning() && hasWindowFocus()) {
+                        ProxyRuntime.openTelegram(this@MainActivity)
+                    }
+                } else if (resultCode == ProxyService.RESULT_FAILED) {
+                    showCommandError()
+                }
             }
-        } catch (error: Exception) {
-            footerBody.text = "Не удалось запустить прокси: ${error.message ?: "неизвестная ошибка"}"
-            Toast.makeText(this, footerBody.text, Toast.LENGTH_LONG).show()
         }
+        try {
+            ProxyService.send(this, action, receiver)
+        } catch (error: Exception) {
+            commandPending = false
+            renderState(ProxyRuntime.snapshot(this))
+            showCommandError()
+        }
+    }
+
+    private fun showCommandError() {
+        Toast.makeText(this, R.string.proxy_command_failed, Toast.LENGTH_LONG).show()
     }
 
     private fun renderState(stats: ProxyStats) {
         val phase = ConnectionPhase.of(stats.running, stats.activeConnections)
-        val (badge, title, body) = when (phase) {
-            ConnectionPhase.STOPPED -> Triple(
-                R.string.proxy_stopped, R.string.home_idle_title, R.string.home_idle_body
-            )
-            ConnectionPhase.LISTENING -> Triple(
-                R.string.proxy_running, R.string.home_running_title, R.string.home_running_body
-            )
-            ConnectionPhase.HAS_CLIENTS -> Triple(
-                R.string.proxy_has_clients, R.string.home_clients_title, R.string.home_clients_body
-            )
+        val (title, body) = when (phase) {
+            ConnectionPhase.STOPPED -> R.string.home_idle_title to R.string.home_idle_body
+            ConnectionPhase.LISTENING -> R.string.home_running_title to R.string.home_running_body
+            ConnectionPhase.HAS_CLIENTS -> R.string.home_clients_title to R.string.home_clients_body
         }
-        statusBadge.setText(badge)
-        heroTitle.setText(title)
-        heroBody.setText(body)
-        val active = phase == ConnectionPhase.HAS_CLIENTS
-        statusBadge.setBackgroundResource(if (active) R.drawable.bg_status_good else R.drawable.bg_status_idle)
-        val badgeColor = colorCompat(when (phase) {
-            ConnectionPhase.STOPPED -> R.color.text_secondary
-            ConnectionPhase.LISTENING -> R.color.brand_dark
-            ConnectionPhase.HAS_CLIENTS -> R.color.accent_dark
-        })
-        statusBadge.setTextColor(badgeColor)
-        statusBadge.compoundDrawables.forEach { it?.setTint(badgeColor) }
-        connectButton.setText(if (stats.running) R.string.primary_action else R.string.home_connect_and_open)
-        checkConnectionButton.setText(
-            if (stats.running) R.string.proxy_already_running else R.string.secondary_action
-        )
-        checkConnectionButton.isEnabled = !stats.running
-        checkConnectionButton.alpha = if (stats.running) 0.60f else 1.0f
+        val titleText = getString(if (commandPending) R.string.home_command_pending else title)
+        if (heroTitle.text.toString() != titleText) heroTitle.text = titleText
+        val bodyText = getString(body)
+        if (heroBody.text.toString() != bodyText) heroBody.text = bodyText
+        connectButton.visibility = if (stats.running) View.VISIBLE else View.GONE
+        connectButton.isEnabled = !commandPending
+        stopButton.isEnabled = !commandPending
+        restartButton.isEnabled = stats.running && !commandPending
+        profileRow.isEnabled = !commandPending
+        findViewById<Button>(R.id.appearanceRow).isEnabled = !commandPending
         routeValue.text = routeLabel(stats)
-        sessionsValue.text = "${stats.activeConnections}/${stats.totalConnections}"
+        sessionsValue.text = getString(R.string.sessions_count, stats.activeConnections, stats.totalConnections)
         trafficValue.text = stats.transferred
         routeStatusValue.text = stats.routeStatus
         routePolicyValue.text = stats.routePolicy
@@ -568,12 +712,12 @@ class MainActivity : AppCompatActivity() {
             getString(R.string.link_mode_mtproto)
         }
         stopButton.text = getString(if (stats.running) R.string.primary_action_stop else R.string.primary_action_start)
-        stopButton.setBackgroundResource(if (stats.running) R.drawable.bg_danger_button else R.drawable.bg_success_button)
+        stopButton.setBackgroundResource(if (stats.running) R.drawable.bg_danger_button else R.drawable.bg_primary_button)
         stopButton.setTextColor(colorCompat(if (stats.running) R.color.danger else R.color.white))
         stopButton.compoundDrawables.forEach { drawable ->
             drawable?.setTint(colorCompat(if (stats.running) R.color.danger else R.color.white))
         }
-        stopButton.alpha = 1.0f
+        stopButton.alpha = if (commandPending) 0.65f else 1.0f
         // The dashboard shows one actionable message, not a wall of counters.
         // Detailed route events remain available in expandable diagnostics.
         footerBody.text = stats.lastMessage
@@ -591,29 +735,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun restartProxy() {
-        ProxyRuntime.restart(this)
-        ProxyService.start(this)
-        renderState(ProxyRuntime.snapshot(this))
-        Toast.makeText(this, R.string.proxy_restarted, Toast.LENGTH_SHORT).show()
+        requestProxyAction(ProxyService.ACTION_RESTART)
     }
 
     private fun stopProxy() {
-        if (ProxyRuntime.isRunning()) {
-            ProxyService.send(this, ProxyService.ACTION_STOP)
-        } else {
-            ProxyRuntime.stop()
-        }
-        renderState(ProxyRuntime.snapshot(this))
-        Toast.makeText(this, R.string.proxy_stopped_toast, Toast.LENGTH_SHORT).show()
+        requestProxyAction(ProxyService.ACTION_STOP)
     }
 
     private fun routeLabel(stats: ProxyStats): String {
         return when {
-            !stats.running -> "Стоп"
+            !stats.running -> getString(R.string.route_not_selected)
+            stats.routeStatus.startsWith("CF без TLS") -> getString(R.string.route_cf_plaintext)
+            stats.routeStatus.startsWith("CF TLS") -> getString(R.string.route_cf_tls)
+            stats.routeStatus.startsWith("CFW") -> "CF Worker"
             stats.routeStatus.startsWith("CF") -> "CF"
             stats.routeStatus.startsWith("WS") -> "WS"
             stats.routeStatus.startsWith("TCP") -> "TCP"
-            else -> "Авто"
+            else -> getString(R.string.route_automatic)
         }
     }
 
@@ -637,7 +775,7 @@ class MainActivity : AppCompatActivity() {
         val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
         var flags = 0
-        if (!isNight && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        if (!isNight) {
             flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         }
         if (!isNight && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -646,12 +784,5 @@ class MainActivity : AppCompatActivity() {
         window.decorView.systemUiVisibility = flags
     }
 
-    private fun colorCompat(id: Int): Int {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            getColor(id)
-        } else {
-            @Suppress("DEPRECATION")
-            resources.getColor(id)
-        }
-    }
+    private fun colorCompat(id: Int): Int = getColor(id)
 }

@@ -40,6 +40,9 @@ class TelegramProxy(
     private val executor = newProxyExecutor(options.threadLimit)
     private val sessionBudget = ProxySessionBudget(options.threadLimit)
     private val cfBalancer = CfProxyBalancer()
+    private val cfAutoTransport = CloudflareAutoTransport()
+    private val cfDialExecutor = newProxyExecutor(6)
+    private val cfDialRace = CloudflareDialRace(cfDialExecutor)
     private val routePlanner = RoutePlanner()
     private val relayProbeGeneration = AtomicLong(0)
     private val h2Transport = if (options.cfH2MediaEnabled) CfH2Transport() else null
@@ -155,6 +158,8 @@ class TelegramProxy(
         relayProbeGeneration.incrementAndGet()
         routePlanner.resetNetworkState()
         frontingDialer.reset()
+        cfBalancer.resetWebSocketTimeouts()
+        cfAutoTransport.reset()
         wsPool.clear()
         workerPool.clear()
         h2Transport?.resetNetwork()
@@ -272,6 +277,7 @@ class TelegramProxy(
         workerPool.close()
         h2Transport?.close()
         poolExecutor.shutdownNow()
+        cfDialExecutor.shutdownNow()
         relayProbeGeneration.incrementAndGet()
         relayProbeExecutor.shutdownNow()
         handshakeWatchdog.shutdownNow()
@@ -386,7 +392,7 @@ class TelegramProxy(
         val methods = routePlanner.methodsFor(
             dcId, isMedia, networkOptions, wsTarget, isTestDc
         )
-        for (method in methods) {
+        val completed = RouteAttemptSequence.run(methods, { client.isClosed }) { method ->
             routePlanner.markTrying(method, dcId, isMedia)
             lastMessage = routePlanner.status()
 
@@ -445,12 +451,14 @@ class TelegramProxy(
                 false
             }
 
-            if (handled) return
-
-            routePlanner.markFailed(method, dcId, isMedia)
-            ConnectionLog.connectFailed(method, dcId, isMedia, failureReason)
-            lastMessage = routePlanner.status()
+            if (!handled && !client.isClosed) {
+                routePlanner.markFailed(method, dcId, isMedia)
+                ConnectionLog.connectFailed(method, dcId, isMedia, failureReason)
+                lastMessage = routePlanner.status()
+            }
+            handled
         }
+        if (completed) return
 
         lastMessage = "Telegram DC$dcId недоступен: все маршруты не ответили"
         ConnectionLog.rejected("DC$dcId недоступен: все маршруты не ответили")
@@ -692,6 +700,15 @@ class TelegramProxy(
         return sessionDown.get()
     }
 
+    private data class CloudflareDialResult(
+        val domain: String,
+        val baseDomain: String,
+        val secure: Boolean,
+        val socket: RawWebSocket
+    ) : Closeable {
+        override fun close() = socket.close()
+    }
+
     private fun bridgeCfProxyFallback(
         client: Socket,
         dcId: Int,
@@ -702,28 +719,52 @@ class TelegramProxy(
         crypto: CryptoContext,
         splitter: MtprotoPacketSplitter?
     ): Boolean {
-        // Cap the number of domains tried per connection. Without a cap a fully
-        // blocked Cloudflare pool could burn through every domain before falling
-        // back, which is exactly when media stalls for tens of seconds.
-        for ((attempt, baseDomain) in cfBalancer.getDomainsForDc(dcId).take(MAX_CF_ATTEMPTS).withIndex()) {
-            val domain = "kws$dcId.$baseDomain"
-            val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.CLOUDFLARE, dcId, isMedia, attempt)
-            val connectStart = System.currentTimeMillis()
-            val ws = try {
-                RawWebSocket.connect(
-                    domain, domain, connectTimeout,
-                    secure = !options.cfPlaintextEnabled
-                )
-            } catch (ignored: Exception) {
-                null
-            } ?: continue
-
-            val connectMs = System.currentTimeMillis() - connectStart
-            cfBalancer.markActiveDomain(dcId, baseDomain)
+        val auto = options.cfAutoFallbackEnabled && !options.cfPlaintextEnabled
+        val domains = if (auto) {
+            val available = (cfBalancer.availableWebSocketDomains(dcId, true) +
+                cfBalancer.availableWebSocketDomains(dcId, false)).toSet()
+            cfBalancer.getDomainsForDc(dcId).filter { it in available }
+        } else cfBalancer.availableWebSocketDomains(dcId, !options.cfPlaintextEnabled)
+        val generation = relayProbeGeneration.get()
+        val start = System.nanoTime()
+        val candidates = domains.take(if (auto) MAX_CF_ATTEMPTS * 2 else MAX_CF_ATTEMPTS).mapIndexed { attempt, baseDomain ->
+            fun(): CloudflareDialResult? {
+                if (client.isClosed || generation != relayProbeGeneration.get()) return null
+                val domain = "kws$dcId.$baseDomain"
+                val timeout = routePlanner.connectTimeoutMs(RouteMethod.CLOUDFLARE, dcId, isMedia, attempt)
+                var secure = !options.cfPlaintextEnabled
+                fun dial(useTls: Boolean): RawWebSocket {
+                    if (client.isClosed || generation != relayProbeGeneration.get()) {
+                        throw IOException("Network changed")
+                    }
+                    secure = useTls
+                    val budget = if (auto) minOf(timeout, 3_000) else timeout
+                    return cfBalancer.dialWebSocket(baseDomain, useTls) {
+                        RawWebSocket.connect(domain, domain, budget, secure = useTls)
+                    }
+                }
+                return try {
+                    val socket = if (auto) cfAutoTransport.connect(true, ::dial) else dial(secure)
+                    CloudflareDialResult(domain, baseDomain, secure, socket)
+                } catch (error: Exception) {
+                    ConnectionLog.info("CF: ${if (secure) "TLS" else "без TLS"}, ${ConnectionLog.failureReason(error)}")
+                    null
+                }
+            }
+        }
+        val result = if (auto) cfDialRace.firstInBatches(candidates, 10_000)
+            else candidates.firstNotNullOfOrNull { it() }
+        if (result == null) return false
+        result.use { connected ->
+            if (client.isClosed || generation != relayProbeGeneration.get()) return false
+            if (!connected.secure) ConnectionLog.info("CF: внешний WebSocket без TLS (разрешено в настройках)")
+            val connectMs = (System.nanoTime() - start) / 1_000_000L
+            cfBalancer.markActiveDomain(dcId, connected.baseDomain)
             cfProxyConnections.incrementAndGet()
-            routePlanner.markConnected(RouteMethod.CLOUDFLARE, dcId, isMedia, connectMs)
-            ConnectionLog.connected(RouteMethod.CLOUDFLARE, dcId, isMedia, connectMs, domain)
+            routePlanner.markConnected(RouteMethod.CLOUDFLARE, dcId, isMedia, connectMs, if (connected.secure) "CF TLS" else "CF без TLS")
+            ConnectionLog.connected(RouteMethod.CLOUDFLARE, dcId, isMedia, connectMs, connected.domain)
             lastMessage = routePlanner.status()
+            val ws = connected.socket
             ws.sendBinary(relayInit)
             val sessionStart = System.currentTimeMillis()
             val received = bridgeClientAndWebSocket(client, clientIn, clientOut, ws, crypto, splitter)
@@ -741,7 +782,6 @@ class TelegramProxy(
             }
             return true
         }
-        return false
     }
 
     /**
@@ -775,15 +815,17 @@ class TelegramProxy(
             )
             return true
         }
-        for ((attempt, workerDomain) in workerDomains.withIndex()) {
+        for ((attempt, workerDomain) in workerPool.availableDomains(options.cfWorkerDomains).take(MAX_CF_ATTEMPTS).withIndex()) {
             val path = "/apiws?dst=$dst&dc=$dcId"
             val connectTimeout = routePlanner.connectTimeoutMs(RouteMethod.WORKER, dcId, isMedia, attempt)
             val connectStart = System.currentTimeMillis()
             val ws = try {
-                RawWebSocket.connect(
-                    workerDomain, workerDomain, connectTimeout, path,
-                    secure = !options.cfPlaintextEnabled
-                )
+                workerPool.dial(workerDomain) {
+                    RawWebSocket.connect(
+                        workerDomain, workerDomain, connectTimeout, path,
+                        secure = !options.cfPlaintextEnabled
+                    )
+                }
             } catch (ignored: Exception) {
                 null
             } ?: continue
@@ -910,9 +952,11 @@ class TelegramProxy(
                     val parts = splitter?.split(encrypted) ?: listOf(encrypted)
                     if (parts.any { it.isNotEmpty() }) ws.sendBinaryBatch(parts)
                 }
-                splitter?.flush()?.let { tail ->
+                if (done.get() == 0) splitter?.flush()?.let { tail ->
                     if (tail.any { it.isNotEmpty() }) ws.sendBinaryBatch(tail)
                 }
+            } catch (error: IOException) {
+                if (done.get() == 0 && !client.isClosed) throw error
             } finally {
                 done.set(1)
                 runCatching { ws.close() }

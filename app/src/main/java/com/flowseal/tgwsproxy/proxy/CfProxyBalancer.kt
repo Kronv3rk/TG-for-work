@@ -6,8 +6,10 @@ import java.util.Locale
 import java.util.concurrent.ExecutorService
 import kotlin.random.Random
 
-class CfProxyBalancer {
+class CfProxyBalancer(private val clock: () -> Long = { System.nanoTime() / 1_000_000L }) {
     private val lock = Any()
+    private val webSocketTimeoutUntil = mutableMapOf<Pair<String, Boolean>, Long>()
+    private var networkGeneration = 0L
     private var domains: List<String> = DEFAULT_ENCODED_DOMAINS.map(::decodeDomain)
     private var dcToDomain: Map<Int, String> = chooseDcDomains(domains)
 
@@ -35,6 +37,39 @@ class CfProxyBalancer {
                     if (domain != current) add(domain)
                 }
             }
+        }
+    }
+
+    internal fun availableWebSocketDomains(dcId: Int, secure: Boolean): List<String> =
+        synchronized(lock) {
+            val now = clock()
+            webSocketTimeoutUntil.entries.removeAll { it.value <= now }
+            getDomainsForDc(dcId).filter { (it to secure) !in webSocketTimeoutUntil }
+        }
+
+    internal fun <T> dialWebSocket(domain: String, secure: Boolean, connect: () -> T): T {
+        val key = domain to secure
+        val attemptGeneration = synchronized(lock) {
+            val until = webSocketTimeoutUntil[key]
+            check(until == null || until <= clock()) { "Cloudflare domain is temporarily unavailable" }
+            networkGeneration
+        }
+        try {
+            return connect()
+        } catch (error: java.net.SocketTimeoutException) {
+            synchronized(lock) {
+                if (attemptGeneration == networkGeneration) {
+                    webSocketTimeoutUntil[key] = clock() + 30_000L
+                }
+            }
+            throw error
+        }
+    }
+
+    internal fun resetWebSocketTimeouts() {
+        synchronized(lock) {
+            networkGeneration++
+            webSocketTimeoutUntil.clear()
         }
     }
 

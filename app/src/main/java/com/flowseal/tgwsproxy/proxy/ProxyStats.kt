@@ -1,5 +1,7 @@
 package com.flowseal.tgwsproxy.proxy
 
+import java.util.Locale
+
 data class ProxyStats(
     val running: Boolean,
     val activeConnections: Int,
@@ -62,11 +64,11 @@ data class ProxyStats(
             val units = arrayOf("B", "KB", "MB", "GB")
             for (unit in units) {
                 if (n < 1024.0) {
-                    return String.format("%.1f %s", n, unit)
+                    return String.format(Locale.US, "%.1f %s", n, unit)
                 }
                 n /= 1024.0
             }
-            return String.format("%.1f TB", n)
+            return String.format(Locale.US, "%.1f TB", n)
         }
     }
 }
